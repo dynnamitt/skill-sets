@@ -85,7 +85,7 @@ See [references/bus-nordic.md](references/bus-nordic.md) for:
 
 See [references/route-planner-vendors.md](references/route-planner-vendors.md) for:
 - Brief profile per scheduling tool (HASTUS, DGPro, Trapeze FX, nPlan) — advertised NeTEx support and Nordic PTO/PTA footprint
-- Why ResourceFrame-data IDs (Operator, Authority, VehicleType, Organisation) are the recurring export gap regardless of vendor
+- Why ResourceFrame record authoring (Operator, Authority, Organisation, VehicleType) is out of planner scope by design — planners emit refs on the journey, the registry authors the target records
 - Community-vs-vendor NeTEx export split (HASTUS community converters vs DGPro native vs Trapeze marketing)
 - Why nPlan is listed alongside proprietary tools (it is first-party Entur open source, not vendor software)
 - Turnit (reservations) noted and excluded
@@ -116,4 +116,4 @@ See [references/route-planner-vendors.md](references/route-planner-vendors.md) f
 
 12. **Each transport mode brings a different ResourceFrame metadata axis** — Rail depth is in *composition/formation* (CompoundTrain → Train → TrainComponent → TrainElement), bus depth is in *functional compliance profiles* per ECE R 107 class (Bus Nordic 2.0), and *spatial layout* (deck plans) cuts across all three modes. Bus Nordic's class-to-requirement matrix maps to VehicleType + FacilitySet + AccessibilityAssessment + PassengerCapacity. Ferry's mode-specific metadata axis has not yet been explored (as of Apr 2025).
 
-13. **Planner-native NeTEx rarely covers ResourceFrame completely** — A ServiceJourney references Operator, Authority, VehicleType, and Organisation IDs that live in ResourceFrame. Scheduling tools (HASTUS, DGPro, Trapeze FX) are built around schedule/vehicle/crew, not the CEN organisational registry. Even tools with native NeTEx export typically need an integration-layer step to populate the ResourceFrame-data IDs that Entur's Nordic profile requires. Codespace-prefixed IDs from the planner almost never match the operator's Entur assignment out of the box.
+13. **Planner scope is Journey reporting, not ResourceFrame authoring** — A ServiceJourney carries OperatorRef, AuthorityRef, VehicleTypeRef, and ResponsibilitySetRef, but the target records (Operator, Authority, Organisation, VehicleType) live in ResourceFrame and are authored through the operator's Entur codespace registry, not the planner. Scheduling tools (HASTUS, DGPro, Trapeze FX) are correctly built around schedule/vehicle/crew — ResourceFrame is out of their remit by design, not a gap. The integration layer's job is a merge step: resolve the refs emitted by the planner against the registry records and normalize codespace prefixes, because planner-internal IDs typically don't match the operator's Entur assignment out of the box.
