@@ -5,8 +5,10 @@ description: >
   code generation challenges, tooling landscape, and rail data modeling best
   practices. Use when working with NeTEx XSD schemas, generating code from NeTEx
   in any language, understanding NeTEx part structure, evaluating XSD-to-code
-  tools, dealing with NeTEx cross-dependencies and subset selection, or modeling
-  rail timetables, train formations, and service disruptions in NeTEx.
+  tools, dealing with NeTEx cross-dependencies and subset selection, modeling
+  rail timetables, train formations, and service disruptions in NeTEx, or
+  evaluating the proprietary route-planner landscape (HASTUS, DGPro, Trapeze FX,
+  nPlan) that produces NeTEx for Entur ingestion.
 ---
 
 # NeTEx Domain Knowledge
@@ -79,6 +81,15 @@ See [references/bus-nordic.md](references/bus-nordic.md) for:
 - Nordic-specific additions beyond EU baseline (alcolock, climate ranges, USB, NCS contrast, ITxPT S01)
 - Finland-specific minimum seat/door counts for Class I
 
+## Route-planner vendor landscape
+
+See [references/route-planner-vendors.md](references/route-planner-vendors.md) for:
+- Brief profile per scheduling tool (HASTUS, DGPro, Trapeze FX, nPlan) — advertised NeTEx support and Nordic PTO/PTA footprint
+- Why ResourceFrame-data IDs (Operator, Authority, VehicleType, Organisation) are the recurring export gap regardless of vendor
+- Community-vs-vendor NeTEx export split (HASTUS community converters vs DGPro native vs Trapeze marketing)
+- Why nPlan is listed alongside proprietary tools (it is first-party Entur open source, not vendor software)
+- Turnit (reservations) noted and excluded
+
 ## Key insights
 
 1. **SIRI is structurally required** — `NeTEx_publication.xsd` unconditionally imports 3 SIRI files. Any code generator starting from that entry point needs SIRI present. Only 12 files / 2,204 lines — negligible overhead.
@@ -104,3 +115,5 @@ See [references/bus-nordic.md](references/bus-nordic.md) for:
 11. **VehicleScheduleFrame enables separation of concerns** — Decouples rolling-stock management from the passenger timetable, critical in rail where Operators, Rolling Stock Providers, and Infrastructure Providers manage their data independently. TrainBlocks describe the complete formation (including coaches from other ServiceJourneys sharing the physical train).
 
 12. **Each transport mode brings a different ResourceFrame metadata axis** — Rail depth is in *composition/formation* (CompoundTrain → Train → TrainComponent → TrainElement), bus depth is in *functional compliance profiles* per ECE R 107 class (Bus Nordic 2.0), and *spatial layout* (deck plans) cuts across all three modes. Bus Nordic's class-to-requirement matrix maps to VehicleType + FacilitySet + AccessibilityAssessment + PassengerCapacity. Ferry's mode-specific metadata axis has not yet been explored (as of Apr 2025).
+
+13. **Planner-native NeTEx rarely covers ResourceFrame completely** — A ServiceJourney references Operator, Authority, VehicleType, and Organisation IDs that live in ResourceFrame. Scheduling tools (HASTUS, DGPro, Trapeze FX) are built around schedule/vehicle/crew, not the CEN organisational registry. Even tools with native NeTEx export typically need an integration-layer step to populate the ResourceFrame-data IDs that Entur's Nordic profile requires. Codespace-prefixed IDs from the planner almost never match the operator's Entur assignment out of the box.
