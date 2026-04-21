@@ -30,14 +30,16 @@ Subset selection is driven by a single config file (`assembly-config.json`) with
 
 The `netex-typescript-model` project decouples XSD parsing from TypeScript generation:
 
-**Stage 1: XSD → JSON Schema (Java DOM via GraalVM)**
+**Stage 1: XSD → JSON Schema (Java DOM via GraalJS on stock JDK 21+)**
 ```
 XSD (all files) → xsd-to-jsonschema.js (Java DOM) → JSON Schema (with x-netex-* annotations)
   → validate-generated-schemas.ts (JSON Schema validation against Draft 07 meta-schema)
   → build-schema-html.ts → netex-schema.html (self-contained interactive viewer)
 ```
 
-**Stage 2: JSON Schema → TypeScript (Node.js)**
+GraalVM runtime is *not* required — Maven resolves GraalJS polyglot dependencies and the converter runs under any distribution of JDK 21+.
+
+**Stage 2a: JSON Schema → monolithic TypeScript split by category**
 ```
 JSON Schema → primitive-ts-gen.ts → inject @see links into schema clone
   → json-schema-to-typescript → monolithic .ts
@@ -45,11 +47,43 @@ JSON Schema → primitive-ts-gen.ts → inject @see links into schema clone
   → tsc --noEmit -p tsconfig.generated.json (type-check)
 ```
 
+**Stage 2b: Focused per-entity codegen (`ts-gen.ts`)**
+```
+JSON Schema → ts-gen.ts <Target> [...]
+  → generateInterface + collectDependencyTree (BFS transitive deps)
+  → makeInlineCodeBlock (XML serialization, via to-xml-shape.ts)
+  → tsc --noEmit --strict --skipLibCheck (auto type-check)
+```
+
+Produces per target:
+
+| File | Content |
+|---|---|
+| `<Name>.ts` | Interface + all transitive dep types (self-contained, no cross-module imports) |
+| `<Name>-mapping.ts` | XML serialization functions (schema → XML projection) |
+
+Flags:
+
+| Flag | Effect |
+|---|---|
+| `--dest-dir <path>` | Output directory (default `/tmp`) |
+| `--exclude a,b,...` | Strip named property names from the generated interface |
+| `--suffix <s>` | Append `<s>` to output filenames (e.g. `-hathor`) |
+| `--overwrite` | Replace existing files (otherwise aborts) |
+| `--collapse-refs` | Replace `VersionOfObjectRefStructure`-typed properties with `Ref<'Entity'>` / `SimpleRef` |
+| `--collapse-collections` | Unwrap single-child `_RelStructure` wrappers to their child entity type |
+
+Entity names are case-sensitive; unknown names are skipped with a warning. This is the "just what you need" path — a self-contained `.ts` file suitable for vendoring into a downstream project without pulling in the full assembly. The `gen-samples/gen-*.sh` convenience scripts (`gen-vehicle.sh`, `gen-vehicletype.sh`, `gen-deckplan.sh`) wrap `ts-gen.ts` with project-specific `--exclude` lists and both collapse flags enabled.
+
 The decoupling means Stage 1 runs on JDK 21+, Stage 2 on Node.js. The JSON Schema is the stable interface between them.
+
+### Lib module architecture
+
+`ts-gen.ts` and the schema HTML viewer both consume the same module set in `html-ts-gen/scripts/lib/`: `classify`, `schema-nav`, `type-res`, `dep-graph`, `collapse`, `codegens`, `data-faker`, `to-xml-shape`, `loader`, `config`, `bundle-entry`. The viewer bundles them via esbuild into an IIFE (`_viewerBundle`) embedded in the HTML page; CLI scripts import them directly. Adding a function to any lib module exposes it to both surfaces at once.
 
 ## Annotation enrichment layer
 
-The converter stamps 10 per-definition and 1 per-property custom annotations on the JSON Schema. These drive downstream classification, viewer features, type resolution, and code generation.
+The converter stamps 10 per-definition and 2 per-property custom annotations on the JSON Schema. These drive downstream classification, viewer features, type resolution, and code generation.
 
 ### Per-definition annotations
 
@@ -57,7 +91,7 @@ The converter stamps 10 per-definition and 1 per-property custom annotations on 
 |---|---|---|
 | `x-netex-source` | string | Origin XSD filename → source map for module splitting |
 | `x-netex-assembly` | string | Assembly name (top-level, not per-def) |
-| `x-netex-role` | string enum | 8-value structural classification (see real-data-containers.md) |
+| `x-netex-role` | string enum | 8-value structural classification (see real-data-containers.md); may carry a `/deprecated` suffix (e.g. `entity/deprecated`) for defs whose XSD description contains uppercase `DEPRECATED` — `defRole()` strips the suffix, `isDeprecated()` detects it |
 | `x-netex-atom` | string | Transparent wrapper detection: primitive type, `"simpleObj"`, or `"array"` |
 | `x-netex-frames` | string[] | Frame membership list (on `frameMember` role only) |
 | `x-netex-mixed` | boolean | `mixed="true"` flag (informational) |
@@ -71,6 +105,7 @@ The converter stamps 10 per-definition and 1 per-property custom annotations on 
 | Annotation | Type | Purpose |
 |---|---|---|
 | `x-netex-choice` | string[] | Sibling property names from same `xsd:choice` group |
+| `x-netex-deprecated` | boolean | `true` on properties whose XSD description contains uppercase `DEPRECATED`; drives strikethrough in the schema viewer and `/** @deprecated */` JSDoc in `generateInterface` |
 | `xml.attribute` | boolean | OpenAPI 3.x — marks XSD attribute-derived properties |
 
 ### How annotations drive downstream
@@ -82,6 +117,7 @@ The converter stamps 10 per-definition and 1 per-property custom annotations on 
 - **Sub-graph pruning**: `x-netex-substitutionGroup` + `x-netex-sg-members` → follow subst. group edges
 - **Data faking**: `x-netex-choice` → emit only first alternative from each choice group
 - **XML serialization**: `xml.attribute` → `$`-prefix for canonical names, `@_`-prefix for `fast-xml-parser` XMLBuilder
+- **Deprecation**: `x-netex-deprecated` (per-prop) + `/deprecated` suffix on `x-netex-role` → `@deprecated` JSDoc in generated interfaces and strikethrough styling in the schema viewer
 
 ## Annotation propagation
 
@@ -189,6 +225,18 @@ For focused outputs (e.g., generating types for just `VehicleType` and its depen
 
 Example: `base@ResourceFrame@tiny` assembly uses sub-graph pruning from `ResourceFrame` with collapse enabled.
 
+### Two collapse mechanisms — do not confuse
+
+The pipeline has two unrelated "collapse" controls operating at different stages on different artifacts. They are independently togglable.
+
+| Stage | Flag | Tool | What it does |
+|---|---|---|---|
+| 1 | `--collapse` | `xsd-to-jsonschema.js` | Inlines transparent wrappers (defs stamped `x-netex-atom`) into the JSON Schema output. Scoped to `--sub-graph` extraction. Sets the top-level `x-netex-collapsed` annotation (a count). |
+| 2 | `--collapse-refs` | `ts-gen.ts` | Replaces `VersionOfObjectRefStructure`-typed properties with `Ref<'Entity'>` / `SimpleRef` in the emitted TypeScript. Implemented in `lib/collapse.ts` (`collapseRef`, `buildTypeOverrides`, `REF_PREAMBLE`). |
+| 2 | `--collapse-collections` | `ts-gen.ts` | Unwraps single-child `_RelStructure` wrappers to the child entity type. Implemented in `lib/collapse.ts` (`collapseColl`, `resolveCollVerStruct`). |
+
+The Stage 1 flag rewrites the *intermediate JSON Schema*; the Stage 2 flags rewrite the *final TypeScript*. Use Stage 1 collapse to shrink a sub-graph's schema footprint; use Stage 2 collapse to produce ergonomic, self-contained TypeScript for a downstream project (as the `gen-samples/gen-*.sh` wrappers do).
+
 ## Documentation outputs
 
 The reference implementation produces three documentation artifacts:
@@ -196,3 +244,7 @@ The reference implementation produces three documentation artifacts:
 1. **JSON Schema HTML viewer** — self-contained page per assembly with sidebar search, role-based filter chips, per-definition sections with syntax-highlighted JSON, interactive explorer panel (graph diagram, relations bipartite graph, interface/type guard/factory code generation, sample data with Flat/XmlShaped/XML toggle)
 2. **TypeDoc** — per-assembly HTML documentation generated from the split TypeScript modules, with `@see` links to the schema viewer
 3. **Docs index** — landing page listing all assemblies with descriptions, stats, and links to both TypeDoc and schema viewer. Deployed to GitHub Pages via CI.
+
+## Release pipeline
+
+`make tarball VERSION=<v>` packages a built assembly as a `.tgz`. Pushing a `v*` tag triggers the release workflow, which builds each CI assembly (`base`, `network+timetable`, and the full `fares+network+new-modes+timetable`) and attaches tarballs to a GitHub Release. Tarball naming: `netex-<netex_version>-<branch>-<assembly>-v<tag>.tgz`. The `VERSION` variable is extracted from the tag by stripping the `v` prefix.

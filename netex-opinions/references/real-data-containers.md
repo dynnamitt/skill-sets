@@ -86,6 +86,8 @@ The `netex-typescript-model` converter implements the above heuristics as a prio
 
 Priority order matters — the first matching rule wins. Types that match none receive no role (unclassified).
 
+A `/deprecated` suffix is appended to the role (e.g. `entity/deprecated`, `structure/deprecated`) when the definition's XSD description contains uppercase `DEPRECATED`. `defRole()` in `classify.ts` strips the suffix when role-based logic only cares about the base role; `isDeprecated()` detects its presence. The schema HTML viewer uses this for strikethrough styling on deprecated definitions.
+
 ### Supporting annotations
 
 | Annotation | Set on | Purpose |

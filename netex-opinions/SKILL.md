@@ -28,7 +28,7 @@ See [references/xsd-structure.md](references/xsd-structure.md) for:
 ## Code generation tooling landscape
 
 See [references/tooling-evaluation.md](references/tooling-evaluation.md) for:
-- Evaluation of 8 XSD-to-code tools across languages (including the proven Java DOM/GraalVM converter)
+- Evaluation of 8 XSD-to-code tools across languages (including the proven Java DOM / GraalJS-on-stock-JDK converter)
 - Why substitution group support is the key discriminator for NeTEx
 - The 10 `x-netex-*` annotation stamps and their downstream uses
 - Risk assessment per tool
@@ -39,13 +39,25 @@ See [references/tooling-evaluation.md](references/tooling-evaluation.md) for:
 
 See [references/pipeline-patterns.md](references/pipeline-patterns.md) for:
 - Recommended pipeline architecture (load all → filter output) with configuration-driven assemblies
-- Two-stage reference implementation (Java DOM → JSON Schema → TypeScript)
-- Annotation enrichment layer (10 per-definition + 1 per-property `x-netex-*` stamps)
-- Sub-graph pruning (`--sub-graph`, `--collapse`) for focused outputs
+- Two-stage reference implementation (Java DOM via GraalJS on stock JDK 21+ → JSON Schema → TypeScript)
+- Annotation enrichment layer (10 per-definition + 2 per-property `x-netex-*` stamps, including `x-netex-deprecated` and the `/deprecated` role suffix)
+- **Two codegen paths**: Stage 2a monolithic split (`primitive-ts-gen.ts` + `split-output.ts`) vs Stage 2b focused per-entity codegen (`ts-gen.ts`) producing self-contained `<Name>.ts` + `<Name>-mapping.ts` files
+- Two independent collapse mechanisms: Stage 1 `--sub-graph` / `--collapse` (JSON Schema wrappers) vs Stage 2 `--collapse-refs` / `--collapse-collections` (TypeScript-level ref and single-child `_RelStructure` rewrites)
 - Annotation propagation strategy (`xsd:documentation` → JSDoc/docstrings, `@see` links)
 - Output splitting by XSD source directory (natural module boundaries) with barrel exports
 - Cross-module import resolution approaches
-- Documentation outputs (schema HTML viewer, TypeDoc, docs index)
+- Documentation outputs (schema HTML viewer, TypeDoc, docs index) and tag-triggered release tarballs
+
+## Build a TypeScript model (end-to-end recipe)
+
+See [references/build-ts-model-recipe.md](references/build-ts-model-recipe.md) for the step-by-step procedure when a user asks to generate TypeScript for a NeTEx target (e.g. *"build a ts model for ResourceFrame"*):
+- Locate or clone `netex-typescript-model` (default `~/entur/netex-typescript-model`)
+- Ensure `generated-src/base/base.schema.json` exists (else `make all` first)
+- Validate target name (case-sensitive) against the schema
+- Interview script (target, frame-vs-members choice, collapse flags, exclusions, dest-dir, suffix, overwrite) with defaults
+- Invocation via `gen-samples/gen-*.sh` wrappers when applicable, else `ts-gen.ts` directly
+- Verification (auto `tsc --strict` check) and failure-mode cheat sheet
+- Common-prompt → invocation cheat sheet, including frame-target warnings
 
 ## Real data container heuristics
 

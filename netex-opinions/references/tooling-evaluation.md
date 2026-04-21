@@ -11,7 +11,7 @@ Evaluated Feb 2026. The key discriminator is **substitution group support** — 
 | **Modelina** | TypeScript + others | No | No | Unknown | Active | Missing critical features |
 | **xsdata** | Python | Yes | Yes | Optimized | Active (v26.2) | Best XSD tool, Python only |
 | **xsd2jsonschema** | JSON Schema | Partial | Partial | Broken | Stable (dormant) | Broken for NeTEx |
-| **Custom Java DOM (GraalVM)** | JSON Schema | Partial (annotations) | Yes | Proven (458 files) | N/A (project-specific) | Proven — the approach that works |
+| **Custom Java DOM (GraalJS on stock JDK 21+)** | JSON Schema | Partial (annotations) | Yes | Proven (458 files) | N/A (project-specific) | Proven — the approach that works |
 | **@kie-tools/xml-parser-ts-codegen** | TypeScript | Yes (unions) | Unknown | Unknown | Apache-backed | Not tested on arbitrary XSD |
 | **xuri/xgen** | Go/C/Java/Rust/TS | Unknown | Unknown | Unknown | Active | Unproven at NeTEx scale |
 
@@ -55,12 +55,12 @@ Evaluated Feb 2026. The key discriminator is **substitution group support** — 
 - Only works for simple single-file or import-only schemas. ISO 20022 (banking) uses imports, not includes, which is why it worked there.
 - **Verdict**: Broken for NeTEx. Do not use.
 
-### Custom Java DOM converter via GraalVM (project-specific — `netex-typescript-model`)
-- XSD → JSON Schema Draft 07 using Java standard library DOM APIs (`DocumentBuilderFactory`, `org.w3c.dom.Node`) via GraalVM JavaScript interop, paired with `json-schema-to-typescript` for final TypeScript output
+### Custom Java DOM converter via GraalJS (project-specific — `netex-typescript-model`)
+- XSD → JSON Schema Draft 07 using Java standard library DOM APIs (`DocumentBuilderFactory`, `org.w3c.dom.Node`) via GraalJS polyglot interop on stock JDK 21+ (GraalVM runtime *not* required), paired with `json-schema-to-typescript` for the monolithic Stage-2a TypeScript output and/or `ts-gen.ts` for self-contained per-entity Stage-2b outputs
 - Plain JavaScript (`xsd-to-jsonschema.js`), no modules, no npm. Runs on stock JDK 21+ with GraalJS polyglot dependencies resolved by Maven
 - **Two-pass architecture**: pass 1 collects groups, raw type entries, element registry, substitution group reverse map, and frame registry; pass 2 converts types and stamps annotations
 - Handles: `complexType`, `simpleType`, `element`, `group`, `attributeGroup`, `complexContent` (extension/restriction), `simpleContent`, `sequence`, `choice`, `all`
-- **Stamps 10 per-definition `x-netex-*` annotations**: `x-netex-source`, `x-netex-assembly`, `x-netex-role` (8-value classification), `x-netex-atom` (transparent wrapper detection), `x-netex-frames` (frame membership), `x-netex-mixed`, `x-netex-substitutionGroup`, `x-netex-sg-members`, `x-netex-refTarget`, `x-netex-collapsed`. Plus 1 per-property: `x-netex-choice` (choice group siblings). Also stamps OpenAPI 3.x `xml: { attribute: true }` on attribute-derived properties
+- **Stamps 10 per-definition `x-netex-*` annotations**: `x-netex-source`, `x-netex-assembly`, `x-netex-role` (8-value classification, optionally suffixed `/deprecated`), `x-netex-atom` (transparent wrapper detection), `x-netex-frames` (frame membership), `x-netex-mixed`, `x-netex-substitutionGroup`, `x-netex-sg-members`, `x-netex-refTarget`, `x-netex-collapsed`. Plus 2 per-property: `x-netex-choice` (choice group siblings) and `x-netex-deprecated` (boolean, drives `@deprecated` JSDoc and viewer strikethrough). Also stamps OpenAPI 3.x `xml: { attribute: true }` on attribute-derived properties
 - **Substitution groups partially modeled**: reads `substitutionGroup` attributes, builds reverse registry, stamps `x-netex-substitutionGroup`/`x-netex-sg-members` annotations. Used for entity classification (rule 8) and sub-graph pruning. **Not yet generating `oneOf`/`anyOf` union types** for polymorphic element references
 - **Sub-graph pruning**: `--sub-graph <TypeName>` prunes schema to definitions reachable from a root type (follows `$ref`, `allOf`, substitution group edges). `--collapse` then inlines transparent wrappers (atom-stamped definitions)
 - **Assembly-driven**: `--parts` flag accepts config keys (`part1_network`) or natural names (`network`) for subset selection. Configuration flows from `assembly-config.json`
@@ -84,7 +84,7 @@ Evaluated Feb 2026. The key discriminator is **substitution group support** — 
 ## Recommended pipelines by target language
 
 ### TypeScript
-**Primary**: Custom Java DOM XSD→JSON Schema converter (GraalVM interop) → `json-schema-to-typescript` — proven at NeTEx scale (458 files → 2,963+ definitions → zero compile errors). Two-stage pipeline with 10 `x-netex-*` annotations enriching the intermediate schema. Key `json-schema-to-typescript` options: `unreachableDefinitions: true`, `format: false` (skip prettier for speed), `additionalProperties: false`. See `netex-typescript-model` for the reference implementation.
+**Primary**: Custom Java DOM XSD→JSON Schema converter (GraalJS polyglot on stock JDK 21+) → `json-schema-to-typescript` for monolithic split output, or `ts-gen.ts` for focused self-contained per-entity output (with optional `--collapse-refs` / `--collapse-collections`) — proven at NeTEx scale (458 files → 2,963+ definitions → zero compile errors). Two-stage pipeline with 10 `x-netex-*` annotations enriching the intermediate schema. Key `json-schema-to-typescript` options: `unreachableDefinitions: true`, `format: false` (skip prettier for speed), `additionalProperties: false`. See `netex-typescript-model` for the reference implementation.
 **Alternative**: Same converter → `json-schema-to-zod` (gets both types and runtime validation)
 **Backup**: `xuri/xgen -l=TypeScript` (untested at NeTEx scale)
 **Do not use**: `xsd2jsonschema` (broken `xs:include`, crashes on `simpleContent`)
