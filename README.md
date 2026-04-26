@@ -6,6 +6,7 @@ A library of [Claude Code](https://claude.ai/code) skills — self-contained ref
 
 | Skill | Description |
 |-------|-------------|
+| `bestagons` | Hex grids — Red Blob vocabulary with `hexx` (Rust), `honeycomb-grid` (TS), Lua/LÖVE pointers |
 | `bevy-ecs` | Bevy 0.18+ ECS architecture, systems, relationships, UI, animation |
 | `federated-search` | React federated search UX with parallel async queries |
 | `netex-opinions` | NeTEx XSD schema analysis, code generation, rail data modeling |

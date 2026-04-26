@@ -18,6 +18,7 @@ Each skill lives in its own directory:
 ```
 
 **Current skills:**
+- `bestagons/` — Hex grids: Red Blob vocabulary + `hexx` (Rust), `honeycomb-grid` (TS), and Lua/LÖVE pointers
 - `bevy-ecs/` — Bevy 0.18+ ECS architecture, systems, relationships, UI, animation
 - `federated-search/` — React federated search UX with parallel async queries
 - `netex-opinions/` — NeTEx XSD schema analysis, code generation, rail data modeling
