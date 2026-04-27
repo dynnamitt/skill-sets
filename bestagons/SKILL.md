@@ -75,6 +75,7 @@ coordinates like vectors. Offset can't do that.
 | Neighbors, distance, line, range, ring, spiral, rotation, reflection, FOV, A* | [references/algorithms.md](references/algorithms.md) |
 | Map shapes, storage strategies, wraparound | [references/storage.md](references/storage.md) |
 | **hexx** (Rust crate, v0.24) | [references/hexx-rust.md](references/hexx-rust.md) |
+| Rust alternatives — `bestagon`, `hexing` | [references/rust-alternatives.md](references/rust-alternatives.md) |
 | **honeycomb-grid** (TS/Node, v4.1.5) | [references/honeycomb-ts.md](references/honeycomb-ts.md) |
 | **Lua / LÖVE (Love2D)** — Red Blob's CC0 lib + Love2D plumbing | [references/lua-love2d.md](references/lua-love2d.md) |
 
@@ -123,6 +124,8 @@ both together.
 - [Red Blob Games — Hexagons Implementation Guide](https://www.redblobgames.com/grids/hexagons/implementation.html) — code in many languages
 - [hexx on docs.rs](https://docs.rs/hexx/) — Rust, v0.24
 - [hexx on GitHub](https://github.com/ManevilleF/hexx)
+- [bestagon on crates.io](https://crates.io/crates/bestagon) — Rust alternative, flat-top only
+- [hexing on crates.io](https://crates.io/crates/hexing) — Rust alternative, GPL-3.0
 - [honeycomb-grid on npm](https://www.npmjs.com/package/honeycomb-grid) — TypeScript, v4.1.5
 - [honeycomb-grid on GitHub](https://github.com/flauwekeul/honeycomb)
 - [Red Blob CC0 Lua reference](https://www.redblobgames.com/grids/hexagons/codegen/output/lib.lua) — drop-in for Lua / LÖVE
