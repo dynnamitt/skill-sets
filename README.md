@@ -10,6 +10,7 @@ A library of [Claude Code](https://claude.ai/code) skills — self-contained ref
 | `bevy-ecs` | Bevy 0.18+ ECS architecture, systems, relationships, UI, animation |
 | `federated-search` | React federated search UX with parallel async queries |
 | `netex-opinions` | NeTEx XSD schema analysis, code generation, rail data modeling |
+| `wave-function-collapse` | WFC procgen — tiled/overlapping models, observe/propagate/backtrack, library pointers |
 
 ## Structure
 
