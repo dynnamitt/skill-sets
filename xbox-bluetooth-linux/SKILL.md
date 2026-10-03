@@ -15,7 +15,7 @@ description: >
   Linux — even if they only say "my controller won't connect over bluetooth".
 metadata:
   author: kdm
-  version: "1.2.0"
+  version: "1.2.1"
   verified: "2026-10 — kernel 7.2.7, BlueZ 5.87, Bazzite 44 (Fedora 44)"
 ---
 
@@ -71,6 +71,7 @@ journal" usually yields an empty result. Real evidence comes from scans and
 | `Failed to pair: org.bluez.Error.AuthenticationFailed` + journal `No agent available for request type 2` | Is an agent registered in the same session? | Missing pairing agent |
 | Pairs, then drops during play | Wi-Fi band, USB autosuspend, distance | Coexistence / power management |
 | Logo goes solid in ~1 s but PC shows nothing | Something else grabbed it | Another host (console, phone, TV) |
+| Paired + connected, logo solid, but no gamepad in Steam / no `js` node; journal `Report Map read failed: … unlikely error` | `grep -A4 'Xbox Wireless' /proc/bus/input/devices` | HID-over-GATT setup ran before encryption and bluetoothd won't retry — restart bluetooth (or reboot), then press the Xbox button |
 | Was paired, now won't reconnect; journal loops `HID Information read failed: … unlikely error` | `btmon`: `Encryption Change … PIN or Key Missing (0x06)` | Controller lost its bond (paired elsewhere, or a pairing attempt via the wrong adapter) — re-pair |
 
 Comparative signals beat absolute ones. Useful comparisons:

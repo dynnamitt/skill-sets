@@ -61,6 +61,11 @@ didn't fix my Xbox connection." Older kernels had paired the controller fine.
     showed `Encryption Change: PIN or Key Missing` on every reconnect while the
     PC still held a valid LE SC key. Fix: udev rule removing the onboard BT
     adapter for good, script selects the dongle by USB id, re-pair.
+14. **Paired but no gamepad.** After the re-pair, bluetoothd logged
+    `Report Map read failed: … unlikely error` and no input device appeared;
+    disconnect + reconnect didn't help. After a reboot, pressing the Xbox
+    button reconnected with encryption from the start and `hid-microsoft`
+    created `js1`. Reboot test passed.
 
 ## Lessons
 
