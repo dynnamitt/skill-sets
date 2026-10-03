@@ -71,8 +71,8 @@ scan off
 Bundled as [../scripts/ble-pair.sh](../scripts/ble-pair.sh):
 
 ```bash
-scripts/ble-pair.sh <MAC>                      # pair
-scripts/ble-pair.sh <MAC> --disable 8087:0aaa  # also soft-block an onboard Intel adapter first
+scripts/ble-pair.sh <MAC>                                          # single adapter
+scripts/ble-pair.sh <MAC> --adapter 2357:0604 --disable 8087:0aaa  # pair via the dongle, block onboard Intel
 ```
 
 Start it **before** the user presses the pair button; it listens for up to
@@ -87,6 +87,11 @@ microsoft 0005:045E:0B13…: input,hidraw…: BLUETOOTH HID v5.24 Gamepad …
 and a `js`/`event` node in `/proc/bus/input/devices`. Steam then adds a
 virtual "Microsoft X-Box 360 pad" — that is Steam Input taking over, not a
 second controller.
+
+With several adapters, always pass `--adapter`: a plain `bluetoothctl` session
+acts on `[default]`, which after a reboot may be the (blocked) onboard adapter.
+Putting the controller in pairing mode for a pairing that then runs on the wrong
+adapter costs the controller its existing bond (seen in the case study).
 
 The script removes any existing bond for that MAC first, so it is for
 (re-)pairing only — normal use is just pressing the Xbox button.

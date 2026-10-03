@@ -22,12 +22,14 @@ grep -E '^\s*ControllerMode' /etc/bluetooth/main.conf           # must be dual (
 grep -E '^\s*UserspaceHID' /etc/bluetooth/input.conf; ls -l /dev/uhid   # BLE HID → uhid; missing uhid = pairs but no input device
 ```
 
-Map `hciN` to a USB id (useful when two adapters are present):
+Map `hciN` to a USB id and address (useful when two adapters are present; numbers
+can swap between boots, and sysfs has no address attribute — ask BlueZ over D-Bus):
 
 ```bash
 for h in /sys/class/bluetooth/hci[0-9]*; do
   case $h in *:*) continue ;; esac   # skip connection entries like hci1:16
-  u=$(readlink -f "$h/device/.."); echo "$(basename $h) $(cat $u/idVendor):$(cat $u/idProduct)"
+  u=$(readlink -f "$h/device/.."); n=$(basename $h)
+  echo "$n $(cat $u/idVendor):$(cat $u/idProduct) $(busctl get-property org.bluez /org/bluez/$n org.bluez.Adapter1 Address)"
 done
 ```
 
@@ -101,6 +103,7 @@ btmon text can print nothing — call `/usr/bin/grep -a` explicitly.
 | `MGMT Command: Pair Device` → `LE Add Device To Accept List` → passive scan → **nothing** | The pairing stall: the controller is never reported in accept-list mode, so no `LE Create Connection` is ever sent |
 | `MGMT Event: Command Complete … Start Discovery … Status: Not Powered (0x0f)` | Kernel thinks the adapter is off although `bluetoothctl show` says `Powered: yes` (seen after rfkill block/unblock) — fix with `bluetoothctl power off && bluetoothctl power on` |
 | `Set Powered … [hci0]` appearing mid-capture | A second adapter was re-enabled (GNOME toggle) |
+| `LE Start Encryption` (Random `0x0`, EDIV `0x0` = LE Secure Connections key) → `Encryption Change … Status: PIN or Key Missing (0x06)` → `Disconnect … Authentication Failure`, repeating every ~2 s | The **controller** no longer has a key for this host while the PC still does. bluetoothd shows it as a loop of `HID Information read failed: Request attribute has encountered an unlikely error`. Re-pair. |
 
 ## bluetoothd messages worth recognising
 

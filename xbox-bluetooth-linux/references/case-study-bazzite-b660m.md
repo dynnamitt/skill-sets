@@ -55,6 +55,12 @@ didn't fix my Xbox connection." Older kernels had paired the controller fine.
     `default-agent`, `scan le` left running, then `pair` / `trust` /
     `connect` → paired, bonded, `hid-microsoft` bound, Steam Input picked it
     up. Auto-reconnect (off → Xbox button) worked.
+13. **After reboot: no reconnect.** `hciN` numbers had swapped, GNOME had
+    re-enabled the Intel adapter and it was `[default]`. A re-pair attempt ran
+    against it; the controller dropped its bond with the dongle. btmon then
+    showed `Encryption Change: PIN or Key Missing` on every reconnect while the
+    PC still held a valid LE SC key. Fix: udev rule removing the onboard BT
+    adapter for good, script selects the dongle by USB id, re-pair.
 
 ## Lessons
 
@@ -66,5 +72,7 @@ didn't fix my Xbox connection." Older kernels had paired the controller fine.
 - After three failed hypotheses, change approach (hardware) instead of trying a
   fourth setting.
 - Start captures before the pairing window; the window is short.
+- With two adapters, never rely on `[default]` — select the adapter explicitly
+  or remove the extra one entirely.
 - rfkill block/unblock can leave the adapter "Not Powered" at the kernel level;
   power-cycle it via bluetoothctl afterwards.

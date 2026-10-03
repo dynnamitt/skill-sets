@@ -15,7 +15,7 @@ description: >
   Linux — even if they only say "my controller won't connect over bluetooth".
 metadata:
   author: kdm
-  version: "1.0.0"
+  version: "1.1.0"
   verified: "2026-10 — kernel 7.2.7, BlueZ 5.87, Bazzite 44 (Fedora 44)"
 ---
 
@@ -71,6 +71,7 @@ journal" usually yields an empty result. Real evidence comes from scans and
 | `Failed to pair: org.bluez.Error.AuthenticationFailed` + journal `No agent available for request type 2` | Is an agent registered in the same session? | Missing pairing agent |
 | Pairs, then drops during play | Wi-Fi band, USB autosuspend, distance | Coexistence / power management |
 | Logo goes solid in ~1 s but PC shows nothing | Something else grabbed it | Another host (console, phone, TV) |
+| Was paired, now won't reconnect; journal loops `HID Information read failed: … unlikely error` | `btmon`: `Encryption Change … PIN or Key Missing (0x06)` | Controller lost its bond (paired elsewhere, or a pairing attempt via the wrong adapter) — re-pair |
 
 Comparative signals beat absolute ones. Useful comparisons:
 - **Another device** (phone, TV) sees the controller instantly but the PC
@@ -127,6 +128,11 @@ may be missing from early advertisements, so match on those fields, not on
   "Solid" means connected — to *something*.
 - **Separate hosts.** A controller remembers one Bluetooth host. Pairing it to
   a TV/phone replaces the PC pairing; the PC must re-pair afterwards.
+- **Name the adapter explicitly.** With two adapters, `hciN` numbers can swap
+  between boots and `bluetoothctl`'s `[default]` can be a blocked adapter.
+  Pairing through the wrong one wipes the controller's existing bond without
+  creating a new one. Use `select <adapter-address>` / `--adapter VID:PID`, or
+  remove the second adapter for good (udev `authorized=0`).
 - **Watch for adapters coming back.** GNOME's Bluetooth toggle unblocks every
   rfkill-blocked adapter. If a second adapter reappears mid-debugging, results
   get confusing — re-check `rfkill list` before each test.

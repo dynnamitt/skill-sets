@@ -4,18 +4,22 @@
 # pairing. Works around desktop pairing UIs that stop discovery first and then
 # hang in the kernel's passive accept-list scan.
 #
-# Usage: ble-pair.sh <MAC> [--disable VID:PID]...
+# Usage: ble-pair.sh <MAC> [--adapter VID:PID] [--disable VID:PID]...
 #   <MAC>              controller address (find it with: bluetoothctl --timeout 20 scan le)
+#   --adapter VID:PID  pair through this adapter (by USB id), e.g. a dongle: --adapter 2357:0604.
+#                      Strongly recommended with more than one adapter: hciN numbers swap
+#                      between boots and bluetoothctl's [default] may be a blocked adapter.
 #   --disable VID:PID  soft-block (rfkill) a Bluetooth adapter by USB id first,
 #                      e.g. an onboard Intel adapter: --disable 8087:0aaa
 #
 # WARNING: removes any existing pairing for <MAC> before pairing again.
 set -u
-MAC=${1:?usage: ble-pair.sh <MAC> [--disable VID:PID]...}; shift
-DISABLE=()
+MAC=${1:?usage: ble-pair.sh <MAC> [--adapter VID:PID] [--disable VID:PID]...}; shift
+DISABLE=(); USE=""
 while [ $# -gt 0 ]; do
   case $1 in
     --disable) DISABLE+=("$2"); shift 2 ;;
+    --adapter) USE=$2; shift 2 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -37,11 +41,28 @@ for id in "${DISABLE[@]}"; do
   done
 done
 
+# Resolve --adapter to a controller address via BlueZ's D-Bus API (sysfs has no address)
+ADDR=""
+if [ -n "$USE" ]; then
+  for h in /sys/class/bluetooth/hci[0-9]*; do
+    case $h in *:*) continue ;; esac
+    [ "$(usb_id "$h")" = "$USE" ] || continue
+    ADDR=$(busctl get-property org.bluez "/org/bluez/$(basename "$h")" org.bluez.Adapter1 Address | awk -F'"' '{print $2}')
+    break
+  done
+  [ -n "$ADDR" ] || { echo "adapter $USE not found" >&2; exit 1; }
+  echo "pairing through adapter $ADDR ($USE)"
+elif [ "$(bluetoothctl list | grep -c '^Controller')" -gt 1 ]; then
+  echo "warning: several adapters present and no --adapter given; bluetoothctl's [default] will be used:" >&2
+  bluetoothctl list >&2
+fi
+
 mkfifo "$F"
 bluetoothctl < "$F" 2>&1 | sed -u 's/\x1b\[[0-9;]*m//g' > "$L" &
 exec 3> "$F"
 send(){ echo "$1" >&3; echo ">>> $1" >> "$L"; }
 
+[ -n "$ADDR" ] && { send "select $ADDR"; sleep 1; send "power on"; sleep 1; }
 send "agent NoInputNoOutput"; sleep 1
 send "default-agent"; sleep 1
 send "remove $MAC"; sleep 1
