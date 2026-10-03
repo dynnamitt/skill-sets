@@ -22,6 +22,8 @@ Each skill lives in its own directory:
 - `bevy-ecs/` — Bevy 0.18+ ECS architecture, systems, relationships, UI, animation
 - `federated-search/` — React federated search UX with parallel async queries
 - `netex-opinions/` — NeTEx XSD schema analysis, code generation, rail data modeling
+- `wave-function-collapse/` — WFC procgen: tiled/overlapping models, observe/propagate/backtrack
+- `xbox-bluetooth-linux/` — Xbox controller Bluetooth (BLE) on Linux: triage, btmon, adapters, pairing workaround (+ `scripts/`)
 
 ## Conventions
 

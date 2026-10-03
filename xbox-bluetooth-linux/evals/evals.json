@@ -1,0 +1,33 @@
+{
+  "skill_name": "xbox-bluetooth-linux",
+  "evals": [
+    {
+      "id": 1,
+      "name": "gnome-pair-hang",
+      "prompt": "my xbox series x controller wont pair with my linux pc (fedora 41, gnome). it shows up in gnome bluetooth settings but when i click it the spinner just spins and nothing happens, no error. i already added bluetooth.disable_ertm=1 like reddit said and rebooted. what should i do?",
+      "expected_output": "Explains Series X|S is Bluetooth LE so ERTM is irrelevant (remove it); recommends gathering evidence with btmon; offers the single-session bluetoothctl workaround (agent registered + LE scan kept running while pairing).",
+      "files": [],
+      "assertions": [
+        "States the Series X|S controller uses Bluetooth LE and that the ERTM setting does not apply / should be removed",
+        "Recommends capturing a pairing attempt with btmon (or equivalent HCI-level evidence)",
+        "Offers pairing from a single bluetoothctl session with an agent registered (agent/default-agent)",
+        "Advises keeping an active scan running while issuing pair (rather than pairing after the scan stopped)",
+        "Does not recommend additional ERTM or [L2CAP] main.conf tweaks"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "intel-never-seen",
+      "prompt": "bazzite on my desktop pc, board has onboard intel wifi+bt (AX201). my xbox controller (the newer one with the share button) never shows up when scanning for bluetooth devices, not in kde and not in bluetoothctl. my phone finds it instantly when its flashing. ive re-paired like 10 times and tried a script that set ertm and some l2cap stuff in main.conf. nothing. ideas?",
+      "expected_output": "Uses the phone comparison to conclude the controller is fine and the onboard adapter is suspect; suggests comparing scan le vs scan on; recommends a USB dongle (RTL8761B) or Xbox Wireless Adapter with xone; keep one adapter active; remove ERTM/L2CAP leftovers.",
+      "files": [],
+      "assertions": [
+        "Uses the fact that the phone sees the controller to conclude the controller works and the PC adapter is the likely problem",
+        "Suggests comparing an LE-only scan (scan le) against the default/interleaved scan",
+        "Recommends a USB Bluetooth dongle or the Xbox Wireless Adapter (xone) as a hardware alternative",
+        "Advises keeping only one Bluetooth adapter active (soft-block/disable the onboard one) if a dongle is added",
+        "Identifies the ERTM/L2CAP script changes as irrelevant for this LE controller and suggests removing them"
+      ]
+    }
+  ]
+}
