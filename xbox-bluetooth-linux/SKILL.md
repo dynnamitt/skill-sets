@@ -15,7 +15,7 @@ description: >
   Linux — even if they only say "my controller won't connect over bluetooth".
 metadata:
   author: kdm
-  version: "1.1.0"
+  version: "1.2.0"
   verified: "2026-10 — kernel 7.2.7, BlueZ 5.87, Bazzite 44 (Fedora 44)"
 ---
 

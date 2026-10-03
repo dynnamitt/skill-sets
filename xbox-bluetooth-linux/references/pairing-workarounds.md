@@ -75,6 +75,22 @@ scripts/ble-pair.sh <MAC>                                          # single adap
 scripts/ble-pair.sh <MAC> --adapter 2357:0604 --disable 8087:0aaa  # pair via the dongle, block onboard Intel
 ```
 
+Machine-specific defaults can go in `~/.config/ble-pair.conf` (a bash snippet;
+CLI arguments override it). Then the script runs without arguments, can be
+symlinked into a personal scripts folder, and the controller's address stays
+out of any repo:
+
+```bash
+MAC=AA:BB:CC:DD:EE:FF
+ADAPTER=2357:0604
+DISABLE=(8087:0aaa)
+```
+
+The script answers bluetoothctl's own agent prompts (`Request authorization` →
+`Accept pairing (yes/no)`) with `yes`. Without that, a controller that requests
+pairing itself — e.g. while in a trusted-but-unpaired state — makes the agent
+swallow the next queued command as its answer and silently refuse.
+
 Start it **before** the user presses the pair button; it listens for up to
 3 minutes. Success looks like `Pairing successful` → `Connection successful`,
 then in `dmesg`:
@@ -104,7 +120,7 @@ A `.desktop` entry that opens the script in a terminal that stays open:
 [Desktop Entry]
 Type=Application
 Name=Gamepad Re-pair
-Exec=kitty --hold /path/to/ble-pair.sh <MAC> --disable 8087:0aaa
+Exec=kitty --hold /path/to/ble-pair.sh        # args from ~/.config/ble-pair.conf
 Icon=input-gaming
 Terminal=false
 Categories=Settings;HardwareSettings;
