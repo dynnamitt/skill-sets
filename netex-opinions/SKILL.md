@@ -8,7 +8,9 @@ description: >
   tools, dealing with NeTEx cross-dependencies and subset selection, modeling
   rail timetables, train formations, and service disruptions in NeTEx, or
   evaluating the proprietary route-planner landscape (HASTUS, DGPro, Trapeze FX,
-  nPlan) that produces NeTEx for Entur ingestion.
+  nPlan) that produces NeTEx for Entur ingestion, or sourcing real-world Norwegian
+  bus fleet data (busphoto.eu, fleet lists, registration plates) for Vehicle,
+  VehicleType and VehicleModel test data.
 ---
 
 # NeTEx Domain Knowledge
@@ -92,6 +94,15 @@ See [references/bus-nordic.md](references/bus-nordic.md) for:
 - Safety, seating, accessibility, information systems, and driver environment specs
 - Nordic-specific additions beyond EU baseline (alcolock, climate ranges, USB, NCS contrast, ITxPT S01)
 - Finland-specific minimum seat/door counts for Class I
+
+## Real-world fleet data (busphoto.eu)
+
+See [references/busphoto-fleet-data.md](references/busphoto-fleet-data.md) for:
+- busphoto.eu URL structure and robots.txt limits (no `/city`, `/list`, `/search` crawling; photos not reusable)
+- Vehicle page → NeTEx v2.0 mapping (`OperationalNumber`, `RegistrationNumber`, `ChassisNumber` for VIN, `BuildDate`, `VehicleModel`)
+- Norway coverage meta (Oct 2026): 176 pre-2020 municipalities, dense/medium/thin tiers, unreliable "Operating" flags
+- Trust ladder: Statens vegvesen > Entur PTA codespace data > PTA/Doffin > busphoto.eu > guesses
+- Workflow from fleet number to `VehicleType` + Bus Nordic class
 
 ## Route-planner vendor landscape
 
