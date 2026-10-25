@@ -131,6 +131,29 @@ adapter costs the controller its existing bond (seen in the case study).
 The script removes any existing bond for `<MAC>` first, so it is for
 (re-)pairing only — normal use is just pressing the Xbox button.
 
+## Live flowchart (kitty)
+
+[../scripts/ble-pair.dot](../scripts/ble-pair.dot) is a flowchart of the script.
+Render it with `dot -Tpng ble-pair.dot -o ble-pair.png`. When the script runs in
+kitty and Graphviz is installed, it re-renders the chart at every step and draws
+it in the terminal with the kitty graphics protocol (`kitten icat --place`):
+
+- **Chart colours:** the current step is amber, visited steps and the edges
+  taken are green, and the end node is green (exit 0), orange (exit 3) or
+  red (exit 1).
+- **Right of the chart:** messages, scan progress, and the `bluetoothctl`
+  session log without advertisement noise (RSSI, manufacturer data).
+
+It falls back to plain text off a terminal, outside kitty, without `dot`, or with
+`FLOWCHART=0`. `FLOW_DPI` sets the render resolution (default 150). Desktop
+sessions often lack Homebrew on `PATH`, so the script also looks for `dot` in
+`/home/linuxbrew/.linuxbrew/bin`.
+
+The script adds node and edge attributes before the DOT's closing brace, so
+keep `}` as the last line and keep node ids in sync with the script's `step`
+calls. `strict digraph` merges a repeated edge into the existing one, and that
+is how the path taken gets recoloured.
+
 ## Desktop launcher (optional)
 
 A `.desktop` entry that opens the script in a terminal that stays open:
@@ -139,7 +162,7 @@ A `.desktop` entry that opens the script in a terminal that stays open:
 [Desktop Entry]
 Type=Application
 Name=Gamepad Re-pair
-Exec=kitty --hold /path/to/ble-pair.sh        # args from ~/.config/ble-pair.conf
+Exec=kitty --start-as=maximized --hold /path/to/ble-pair.sh   # args from ~/.config/ble-pair.conf
 Icon=input-gaming
 Terminal=false
 Categories=Settings;HardwareSettings;

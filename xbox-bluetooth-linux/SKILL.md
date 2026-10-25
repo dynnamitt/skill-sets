@@ -110,7 +110,8 @@ may be missing from early advertisements, so match on those fields, not on
    `bluetoothctl` session with an agent registered and an active LE scan
    still running — bundled as [scripts/ble-pair.sh](scripts/ble-pair.sh). See
    [references/pairing-workarounds.md](references/pairing-workarounds.md) for
-   why this works.
+   why this works. In kitty it shows a live flowchart of its progress
+   ([scripts/ble-pair.dot](scripts/ble-pair.dot)).
    Success looks like `hid-generic`/`microsoft 0005:045E:0B13 … BLUETOOTH HID … Gamepad`
    in `dmesg` — the in-kernel `hid-microsoft` driver is enough. `xpadneo` is
    optional (better rumble/battery) and not present in every image; check
