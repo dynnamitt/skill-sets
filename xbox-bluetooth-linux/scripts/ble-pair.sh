@@ -22,9 +22,9 @@
 #   ADAPTER=2357:0604        # optional, as --adapter
 #   DISABLE=(8087:0aaa)      # optional, as --disable
 #
-# In kitty (with Graphviz installed) the terminal shows ble-pair.dot as a live
-# flowchart with the current step highlighted, next to the messages and the tail
-# of the bluetoothctl log. Elsewhere, or with FLOWCHART=0, it prints plain text.
+# In kitty (with Graphviz installed) the terminal shows only ble-pair.dot as a live
+# flowchart: current step highlighted, latest message as the caption. Elsewhere,
+# or with FLOWCHART=0, it prints the messages as plain text.
 #
 # WARNING: removes any existing pairing for <MAC>, and forgets cached unpaired
 # gamepads, before pairing again.
@@ -48,19 +48,19 @@ notify(){ command -v notify-send >/dev/null && notify-send -i "$1" "Gamepad" "$2
 strip(){ sed -u 's/\x1b\[[0-9;]*[mK]//g'; }   # colours and erase-line codes
 
 # --- Live flowchart ---------------------------------------------------------
-# step <node> [message] moves to a node of ble-pair.dot; msg <text> adds a message.
-# With GFX=1 each step re-renders the DOT with the path so far highlighted and
-# redraws the screen: image on the left, text on the right (kitty graphics protocol).
+# step <node> [message] moves to a node of ble-pair.dot; msg <text> sets the message.
+# With GFX=1 the terminal shows only the chart, re-rendered on every step and message:
+# the path so far highlighted, the latest message as its caption (kitty graphics protocol).
 HERE=$(dirname "$(readlink -f "$0")")
 FLOW_DOT=${FLOW_DOT:-$HERE/ble-pair.dot}
 command -v dot >/dev/null || PATH=$PATH:/home/linuxbrew/.linuxbrew/bin   # Homebrew isn't on the desktop session's PATH
 GFX=0
 [ "${FLOWCHART:-1}" != 0 ] && [ -t 1 ] && [ -n "${KITTY_WINDOW_ID:-}" ] && [ -r "$FLOW_DOT" ] &&
   command -v kitten >/dev/null && command -v dot >/dev/null && GFX=1
-CUR=""; VISITED=(); TAKEN=(); MSGS=(); PROGRESS=""; IW=0; COLS=80; ROWS=24
+CUR=""; VISITED=(); TAKEN=(); CAPTION=""
 
-# render: ble-pair.dot plus attribute lines for visited nodes, taken edges and the
-# current node ("strict" in the DOT merges them into the existing nodes and edges)
+# render: ble-pair.dot plus attribute lines for visited nodes, taken edges, the
+# current node ("strict" in the DOT merges them into the existing ones) and the caption
 render(){
   local fill line
   case $CUR in
@@ -70,67 +70,33 @@ render(){
   { sed '$d' "$FLOW_DOT"
     (( ${#VISITED[@]} )) && printf '  %s [fillcolor="#c8e6c9" color="#66bb6a"]\n' "${VISITED[@]}"
     (( ${#TAKEN[@]} )) && printf '  %s [color="#2e7d32" fontcolor="#2e7d32" penwidth=2]\n' "${TAKEN[@]}"
-    printf '  %s [fillcolor="%s" color="%s" penwidth=3]\n}\n' "$CUR" "$fill" "$line"
+    printf '  %s [fillcolor="%s" color="%s" penwidth=3]\n' "$CUR" "$fill" "$line"
+    printf '  label="%s" labelloc=b fontsize=13\n}\n' "${CAPTION//\"/\\\"}"
   } | dot -Tpng -Gdpi="${FLOW_DPI:-150}" -o "$D/flow.png" 2>/dev/null
-}
-
-# layout: image width in columns = image scaled to the terminal height, leaving
-# at least 40 columns for text; ~45 % of the width if the pixel size is unknown
-layout(){
-  local ws w h
-  COLS=$(tput cols); ROWS=$(tput lines)
-  ws=$(kitten icat --print-window-size 2>/dev/null)
-  read -r w h < <(od -An -tu1 -j16 -N8 "$D/flow.png" |
-    awk '{print $1*16777216+$2*65536+$3*256+$4, $5*16777216+$6*65536+$7*256+$8}')
-  if [[ $ws =~ ^([0-9]+)x([0-9]+)$ ]] && (( h > 0 )); then
-    IW=$(( (w * BASH_REMATCH[2] * COLS / h + BASH_REMATCH[1] - 1) / BASH_REMATCH[1] ))
-  else
-    IW=$(( COLS * 45 / 100 ))
-  fi
-  (( IW > COLS - 40 )) && IW=$(( COLS - 40 ))
-  (( IW < 0 )) && IW=0
-}
-
-# draw_text: messages (latest in bold), progress, then the bluetoothctl log tail
-# (minus advertisement noise), in the columns right of the image
-draw_text(){
-  local x=$(( IW + 2 )) w=$(( COLS - IW - 2 )) i s
-  local first=$(( ${#MSGS[@]} > ROWS / 2 ? ${#MSGS[@]} - ROWS / 2 : 0 ))
-  local latest=$(( ${#MSGS[@]} - first - 1 ))
-  local out=("${MSGS[@]:first}" "$PROGRESS" "" "── bluetoothctl ──")
-  local room=$(( ROWS - ${#out[@]} - 1 ))
-  [ -s "$L" ] && (( room > 0 )) && mapfile -t -O ${#out[@]} out < <(grep -avE 'RSSI|ManufacturerData|TxPower|^\s*$' "$L" |
-    sed 's/^\[bluetoothctl\]> //' | tail -n "$room")
-  for (( i = 0; i < ROWS - 1; i++ )); do
-    s=${out[i]:-}; s=${s:0:w}
-    (( i == latest )) && s=$'\e[1m'$s$'\e[0m'
-    printf '\e[%d;%dH\e[K%s' $(( i + 1 )) "$x" "$s"
-  done
 }
 
 draw(){
   kitten icat --clear --stdin=no 2>/dev/null; printf '\e[H\e[2J'
-  kitten icat --stdin=no --scale-up --align=left --place "${IW}x$(( ROWS - 1 ))@0x0" "$D/flow.png" 2>/dev/null
-  draw_text
+  kitten icat --stdin=no --scale-up --place "$(tput cols)x$(( $(tput lines) - 1 ))@0x0" "$D/flow.png" 2>/dev/null
 }
 
-msg(){ MSGS+=("$*"); if (( GFX )); then draw_text; else echo "$*"; fi; }
-tick(){ (( GFX )) && draw_text; }
+# A step with a message starts a new caption; msg adds a line to it.
+refresh(){ if render; then draw; else GFX=0; fi; }
+msg(){ CAPTION=${CAPTION:+$CAPTION\\n}$*; if (( GFX )); then refresh; else echo "$*"; fi; }
 step(){
+  local moved=0
   if [ "$1" != "$CUR" ]; then
     [ -n "$CUR" ] && VISITED+=("$CUR") && TAKEN+=("$CUR -> $1")
-    CUR=$1
-    if (( GFX )); then
-      if render; then (( IW )) || layout; draw; else GFX=0; fi
-    fi
+    CUR=$1 moved=1
   fi
-  [ -n "${2:-}" ] && msg "$2"
+  if [ -n "${2:-}" ]; then CAPTION=""; msg "$2"
+  elif (( moved && GFX )); then refresh; fi
   return 0
 }
 if (( GFX )); then
   printf '\e[?25l'
-  trap 'printf "\e[?25h\e[%d;1H" "$ROWS"' EXIT
-  trap 'layout; draw' WINCH
+  trap 'printf "\e[?25h\e[%d;1H" "$(tput lines)"' EXIT
+  trap draw WINCH
 fi
 # -----------------------------------------------------------------------------
 
@@ -207,7 +173,7 @@ send(){ answer_prompts; echo ">>> $1" >> "$L"; echo "$1" >&3; }
 # (marker/regex passed via ENVIRON: awk -v would eat backslashes, turning "\[NEW\]" into "[NEW]")
 seen(){ M=">>> $1" RE="$2" awk 'index($0,ENVIRON["M"])==1{on=1} on && $0~ENVIRON["RE"]{f=1; exit} END{exit !f}' "$L"; }
 # wait_for <command> <regex> <seconds>: poll seen() every 0.5 s
-wait_for(){ local n=$(( $3 * 2 )); while (( n-- > 0 )); do answer_prompts; seen "$1" "$2" && return 0; tick; sleep 0.5; done; return 1; }
+wait_for(){ local n=$(( $3 * 2 )); while (( n-- > 0 )); do answer_prompts; seen "$1" "$2" && return 0; sleep 0.5; done; return 1; }
 
 # gamepads: unpaired gamepad-like advertisers since "scan le", in order of first sight.
 # Gamepad-like = gamepad appearance/icon, a controller-ish name, or HID service (0x1812)
@@ -253,10 +219,8 @@ while (( T < SCAN_SECS * 2 )); do
       break
     fi
   fi
-  PROGRESS="… $(( T / 2 )) s of $SCAN_SECS s"; tick
   sleep 0.5; T=$((T + 1))
 done
-PROGRESS=""
 [ -n "$PICK$REASON" ] || { step preferred; step others; REASON="no controller seen${MAC:+ ($MAC)}"; }
 
 if [ -n "$PICK" ]; then
@@ -282,7 +246,7 @@ send "quit"; exec 3>&-; wait
 # device address). Paired+connected without one is the HID-over-GATT setup failing
 # before encryption ("Report Map read failed"), which bluetoothd won't retry.
 INPUT_DEVICES=${INPUT_DEVICES:-/proc/bus/input/devices}   # override for testing
-has_input(){ local n=$(( $2 * 2 )); while (( n-- > 0 )); do grep -qix "U: Uniq=$1" "$INPUT_DEVICES" && return 0; tick; sleep 0.5; done; return 1; }
+has_input(){ local n=$(( $2 * 2 )); while (( n-- > 0 )); do grep -qix "U: Uniq=$1" "$INPUT_DEVICES" && return 0; sleep 0.5; done; return 1; }
 
 if [ -n "$PICK" ] && seen "info $PICK" 'Paired: yes' && seen "info $PICK" 'Connected: yes'; then
   step input
@@ -300,7 +264,9 @@ if [ -n "$PICK" ] && seen "info $PICK" 'Paired: yes' && seen "info $PICK" 'Conne
   exit 3
 fi
 step fail "Pairing did not complete${REASON:+: $REASON}."
-while read -r l; do msg "$l"; done < <(grep -aE "Failed to pair|Failed to connect|not available" "$L")
+# errors from the scan onwards (the startup "remove" replies "not available" are expected)
+while read -r l; do msg "${l#\[bluetoothctl\]> }"; done < <(awk 'index($0,">>> scan le")==1{on=1} on' "$L" |
+  grep -aE "Failed to pair|Failed to connect|not available")
 msg "Full bluetoothctl log: $L"
 notify dialog-error "Pairing failed — see the terminal"
 exit 1
