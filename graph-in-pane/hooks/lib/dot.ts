@@ -1,7 +1,7 @@
+import type { Openable } from '../../types'
 import { type Call, type FileSkeleton, type Skeleton, TOP } from './skeleton'
 
-/** A box the pane can open: `target` is an absolute file path or `${file}#${fn}`. */
-export type Openable = { n: number; label: string; target: string }
+export type { Openable }
 export type Graph = { dot: string; openable: Openable[] }
 
 export const COLORS = {
