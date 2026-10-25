@@ -42,6 +42,7 @@ const fakeHost = (onPath: Record<string, string>, files: readonly string[], log:
   },
   exists: async path => files.includes(path),
   env: async name => (name === 'HOME' ? '/home/u' : undefined),
+  list: async () => [],
 })
 
 test('a tool on PATH is found with command -v', async () => {

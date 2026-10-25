@@ -1,4 +1,4 @@
-import type { EngineInterface, ProcessRunInit, ProcessRunResult } from 'claude-code'
+import type { EngineInterface, FsEntry, ProcessRunInit, ProcessRunResult } from 'claude-code'
 
 /** The environment variables the mod reads; `$.env.get` takes literal names. */
 export type EnvName = 'HOME' | 'XDG_CACHE_HOME' | 'XDG_DATA_HOME'
@@ -8,6 +8,7 @@ export type Host = {
   run: (argv: readonly string[], init?: ProcessRunInit) => Promise<ProcessRunResult>
   exists: (path: string) => Promise<boolean>
   env: (name: EnvName) => Promise<string | undefined>
+  list: (dir: string) => Promise<readonly FsEntry[]>
 }
 
 // A function declaration: the engine follows `$` past an import only into one.
@@ -15,6 +16,7 @@ export function hostOf($: EngineInterface): Host {
   return {
     run: (argv, init) => $.process.run(argv, init),
     exists: path => $.fs.exists(path),
+    list: dir => $.fs.list(dir),
     env: name =>
       name === 'HOME'
         ? $.env.get('HOME')
