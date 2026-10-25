@@ -23,7 +23,7 @@
 #   DISABLE=(8087:0aaa)      # optional, as --disable
 #
 # In kitty (with Graphviz installed) the terminal shows only ble-pair.dot as a live
-# flowchart: current step highlighted, latest message as the caption. Elsewhere,
+# flowchart: path so far highlighted, current messages as the caption. Elsewhere,
 # or with FLOWCHART=0, it prints the messages as plain text.
 #
 # WARNING: removes any existing pairing for <MAC>, and forgets cached unpaired
@@ -32,77 +32,75 @@ set -u
 MAC=""; ADAPTER=""; DISABLE=()
 CONF=${BLE_PAIR_CONF:-${XDG_CONFIG_HOME:-$HOME/.config}/ble-pair.conf}
 [ -r "$CONF" ] && . "$CONF"
-USE=$ADAPTER
 case ${1:-} in ""|--*) ;; *) MAC=$1; shift ;; esac
 while [ $# -gt 0 ]; do
   case $1 in
     --disable) DISABLE+=("$2"); shift 2 ;;
-    --adapter) USE=$2; shift 2 ;;
-    *) echo "usage: ble-pair.sh [<MAC>] [--adapter VID:PID] [--disable VID:PID]..." >&2; exit 2 ;;
+    --adapter) ADAPTER=$2; shift 2 ;;
+    *) sed -n 's/^# Usage: /usage: /p' "$0" >&2; exit 2 ;;
   esac
 done
 MAC=${MAC^^}
 
 D=$(mktemp -d); L=$D/session.log; F=$D/btctl.fifo
 notify(){ command -v notify-send >/dev/null && notify-send -i "$1" "Gamepad" "$2"; }
-strip(){ sed -u 's/\x1b\[[0-9;]*[mK]//g'; }   # colours and erase-line codes
+# strip colours, erase-line codes and bluetoothctl's "[prompt]> " prefixes
+strip(){ sed -u -E 's/\x1b\[[0-9;]*[mK]//g; s/^(\[[^]]*\]> )+//'; }
 
-# --- Live flowchart ---------------------------------------------------------
-# step <node> [message] moves to a node of ble-pair.dot; msg <text> sets the message.
-# With GFX=1 the terminal shows only the chart, re-rendered on every step and message:
-# the path so far highlighted, the latest message as its caption (kitty graphics protocol).
-HERE=$(dirname "$(readlink -f "$0")")
-FLOW_DOT=${FLOW_DOT:-$HERE/ble-pair.dot}
+# --- Live flowchart (kitty + Graphviz) --------------------------------------
+# step <node> [message] and msg <text> only record state (TRAIL of ble-pair.dot
+# node ids, CAPTION); flush renders and draws it at the next wait and on exit.
+FLOW_DOT=${FLOW_DOT:-$(dirname "$(readlink -f "$0")")/ble-pair.dot}
 command -v dot >/dev/null || PATH=$PATH:/home/linuxbrew/.linuxbrew/bin   # Homebrew isn't on the desktop session's PATH
 GFX=0
 [ "${FLOWCHART:-1}" != 0 ] && [ -t 1 ] && [ -n "${KITTY_WINDOW_ID:-}" ] && [ -r "$FLOW_DOT" ] &&
   command -v kitten >/dev/null && command -v dot >/dev/null && GFX=1
-CUR=""; VISITED=(); TAKEN=(); CAPTION=""
+TRAIL=(); CAPTION=""; DIRTY=0; SIZE=""
 
-# render: ble-pair.dot plus attribute lines for visited nodes, taken edges, the
-# current node ("strict" in the DOT merges them into the existing ones) and the caption
+# render: the DOT plus the trail (visited nodes and their edges green, the current
+# node coloured by outcome) and the caption, at the window's pixel size if known
 render(){
-  local fill line
-  case $CUR in
+  local cur=${TRAIL[*]: -1} fill line chain cap opts=(-Gdpi=150)
+  case $cur in
     ok) fill="#66bb6a" line="#1b5e20" ;;  noinput) fill="#ffcc80" line="#e65100" ;;
     fail) fill="#ef9a9a" line="#b71c1c" ;; *) fill="#ffe082" line="#ff6f00" ;;
   esac
-  { sed '$d' "$FLOW_DOT"
-    (( ${#VISITED[@]} )) && printf '  %s [fillcolor="#c8e6c9" color="#66bb6a"]\n' "${VISITED[@]}"
-    (( ${#TAKEN[@]} )) && printf '  %s [color="#2e7d32" fontcolor="#2e7d32" penwidth=2]\n' "${TAKEN[@]}"
-    printf '  %s [fillcolor="%s" color="%s" penwidth=3]\n' "$CUR" "$fill" "$line"
-    printf '  label="%s" labelloc=b fontsize=13\n}\n' "${CAPTION//\"/\\\"}"
-  } | dot -Tpng -Gdpi="${FLOW_DPI:-150}" -o "$D/flow.png" 2>/dev/null
+  printf -v chain '%s -> ' "${TRAIL[@]}"
+  cap=$(fold -s -w 60 <<<"$CAPTION")   # a wide caption would shrink the chart
+  cap=${cap//\\/\\\\}; cap=${cap//\"/\\\"}; cap=${cap//$'\n'/\\n}
+  [ -n "$SIZE" ] && opts=(-Gdpi=96 -Gsize="$SIZE")
+  { sed '/^}/,$d' "$FLOW_DOT"
+    printf '  %s [fillcolor="#c8e6c9" color="#66bb6a"]\n' "${TRAIL[@]}"
+    (( ${#TRAIL[@]} > 1 )) && printf '  %s [color="#2e7d32" penwidth=2]\n' "${chain% -> }"
+    printf '  %s [fillcolor="%s" color="%s" penwidth=3]\n  label="%s"\n}\n' "$cur" "$fill" "$line" "$cap"
+  } | dot -Tpng "${opts[@]}" -o "$D/flow.png" 2>/dev/null
 }
-
+# winsize: Graphviz size in inches at 96 dpi, filling the window minus its last row
+winsize(){
+  local ws; ws=$(kitten icat --print-window-size 2>/dev/null)
+  [[ $ws =~ ^([0-9]+)x([0-9]+)$ ]] &&
+    SIZE=$(awk -v w="${BASH_REMATCH[1]}" -v h="${BASH_REMATCH[2]}" -v r="$(tput lines)" \
+      'BEGIN{printf "%.2f,%.2f!", w/96, h*(r-1)/r/96}')
+}
 draw(){
   kitten icat --clear --stdin=no 2>/dev/null; printf '\e[H\e[2J'
   kitten icat --stdin=no --scale-up --place "$(tput cols)x$(( $(tput lines) - 1 ))@0x0" "$D/flow.png" 2>/dev/null
 }
-
-# A step with a message starts a new caption; msg adds a line to it.
-refresh(){ if render; then draw; else GFX=0; fi; }
-msg(){ CAPTION=${CAPTION:+$CAPTION\\n}$*; if (( GFX )); then refresh; else echo "$*"; fi; }
+flush(){ (( GFX && DIRTY )) || return 0; DIRTY=0; render && draw || { GFX=0; echo "$CAPTION"; }; }
+msg(){ CAPTION=${CAPTION:+$CAPTION$'\n'}$*; DIRTY=1; (( GFX )) || echo "$*"; }
 step(){
-  local moved=0
-  if [ "$1" != "$CUR" ]; then
-    [ -n "$CUR" ] && VISITED+=("$CUR") && TAKEN+=("$CUR -> $1")
-    CUR=$1 moved=1
-  fi
-  if [ -n "${2:-}" ]; then CAPTION=""; msg "$2"
-  elif (( moved && GFX )); then refresh; fi
-  return 0
+  [ "$1" = "${TRAIL[*]: -1}" ] || { TRAIL+=("$1"); DIRTY=1; }
+  [ -z "${2:-}" ] || { CAPTION=""; msg "$2"; }
 }
 if (( GFX )); then
-  printf '\e[?25l'
-  trap 'printf "\e[?25h\e[%d;1H" "$(tput lines)"' EXIT
-  trap draw WINCH
+  winsize; printf '\e[?25l'
+  trap 'flush; printf "\e[?25h\e[%d;1H" "$(tput lines)"' EXIT
+  trap 'winsize; DIRTY=1; flush' WINCH
 fi
 # -----------------------------------------------------------------------------
 
-step start
-systemctl is-active -q bluetooth || { step service; step fail "bluetooth service is not running (sudo systemctl start bluetooth)"; exit 1; }
-step service
+step prep
+systemctl is-active -q bluetooth || { step fail "bluetooth service is not running (sudo systemctl start bluetooth)"; exit 1; }
 
 # hci_by_usb VID:PID -> adapter names (hciN) whose USB id matches
 hci_by_usb(){
@@ -115,7 +113,6 @@ hci_by_usb(){
 }
 
 # Soft-block every adapter listed in --disable
-step adapters
 while read -r h; do
   for r in /sys/class/bluetooth/"$h"/rfkill*; do
     [ -e "$r" ] && rfkill block "${r##*rfkill}" && msg "adapter $h soft-blocked (rfkill ${r##*rfkill})"
@@ -124,33 +121,31 @@ done < <(for id in "${DISABLE[@]}"; do hci_by_usb "$id"; done)
 
 # Resolve --adapter to a controller address (sysfs has no address; ask BlueZ over D-Bus)
 ADDR=""
-if [ -n "$USE" ]; then
-  HCI=$(hci_by_usb "$USE" | head -1)
+if [ -n "$ADAPTER" ]; then
+  HCI=$(hci_by_usb "$ADAPTER" | head -1)
   [ -n "$HCI" ] && ADDR=$(busctl get-property org.bluez "/org/bluez/$HCI" org.bluez.Adapter1 Address | awk -F'"' '{print $2}')
-  [ -n "$ADDR" ] || { step fail "adapter $USE not found"; exit 1; }
-  msg "pairing through adapter $ADDR ($USE)"
+  [ -n "$ADDR" ] || { step fail "adapter $ADAPTER not found"; exit 1; }
+  msg "pairing through adapter $ADDR ($ADAPTER)"
 else
   CTRLS=$(bluetoothctl list)
-  if [ "$(grep -c '^Controller' <<<"$CTRLS")" -gt 1 ]; then
-    msg "warning: several adapters present and no --adapter given; bluetoothctl's [default] will be used:"
-    while read -r c; do msg "  $c"; done <<<"$CTRLS"
-  fi
+  [ "$(grep -c '^Controller' <<<"$CTRLS")" -gt 1 ] &&
+    msg "warning: several adapters and no --adapter; bluetoothctl's [default] will be used:"$'\n'"$CTRLS"
 fi
 
 # Known devices, before the session. Paired gamepads other than <MAC> are left alone
 # (and never picked); cached *unpaired* gamepads are forgotten so that, back in pairing
 # mode, they reappear as [NEW] with their full advertisement (name, HID UUID, vendor).
-step snapshot
+PAD_RE='Appearance: 0x03c4|Icon: input-gaming'
 macs(){ bluetoothctl devices "$@" | strip | awk '$1=="Device"{print $2}' | sort -u; }
-PAIRED=$(macs Paired | grep -vxF "${MAC:-none}")
-STALE=$(comm -23 <(macs) <(macs Paired) |
-  while read -r m; do bluetoothctl info "$m" | grep -qE 'Icon: input-gaming|Appearance: 0x03c4' && echo "$m"; done)
+ALLPAIRED=$(macs Paired)
+PAIRED=$(grep -vxF "${MAC:-none}" <<<"$ALLPAIRED")
+STALE=$(comm -23 <(macs) <(echo "$ALLPAIRED") |
+  while read -r m; do bluetoothctl info "$m" | grep -qE "$PAD_RE" && echo "$m"; done)
 
 # One bluetoothctl session fed through a FIFO. Its output is appended (>>) to the
-# log; send() appends a ">>> cmd" marker BEFORE each command, so wait_for only
-# looks at replies to that command (earlier reconnect attempts print stale
+# log; send() appends a ">>> cmd" marker BEFORE each command, so replies are only
+# looked for after their command (earlier reconnect attempts print stale
 # "[CHG] Device <MAC>" lines that must not count).
-step session
 mkfifo "$F"
 bluetoothctl --agent NoInputNoOutput < "$F" 2>&1 | strip >> "$L" &
 exec 3> "$F"
@@ -162,98 +157,88 @@ exec 3> "$F"
 # every output line. Note: accepts any pairing request during this short session.
 ANSWERED=0
 answer_prompts(){
-  local n; n=$(grep -aoE 'Request (authorization|confirmation)|Authorize service' "$L" | wc -l)
+  local n; n=$(grep -acE 'Request (authorization|confirmation)|Authorize service' "$L")
   while (( ANSWERED < n )); do
     echo ">>> yes (agent prompt)" >> "$L"; echo "yes" >&3; ANSWERED=$((ANSWERED + 1))
   done
 }
 send(){ answer_prompts; echo ">>> $1" >> "$L"; echo "$1" >&3; }
-
-# seen <command> <regex>: has <regex> appeared after <command>'s marker?
-# (marker/regex passed via ENVIRON: awk -v would eat backslashes, turning "\[NEW\]" into "[NEW]")
-seen(){ M=">>> $1" RE="$2" awk 'index($0,ENVIRON["M"])==1{on=1} on && $0~ENVIRON["RE"]{f=1; exit} END{exit !f}' "$L"; }
-# wait_for <command> <regex> <seconds>: poll seen() every 0.5 s
-wait_for(){ local n=$(( $3 * 2 )); while (( n-- > 0 )); do answer_prompts; seen "$1" "$2" && return 0; sleep 0.5; done; return 1; }
+# since <command>: log lines from <command>'s marker on
+since(){ M=">>> $1" awk 'index($0,ENVIRON["M"])==1{on=1} on' "$L"; }
+seen(){ since "$1" | grep -qaE "$2"; }
+# poll <seconds> <command...>: retry every 0.5 s until it succeeds, answering agent
+# prompts and drawing the flowchart meanwhile
+poll(){ local n=$(( $1 * 2 )); shift; while (( n-- > 0 )); do answer_prompts; flush; "$@" && return 0; sleep 0.5; done; return 1; }
+wait_for(){ poll "$3" seen "$1" "$2"; }
+run(){ send "$1"; wait_for "$1" "$2" "${3:-5}"; }
 
 # gamepads: unpaired gamepad-like advertisers since "scan le", in order of first sight.
 # Gamepad-like = gamepad appearance/icon, a controller-ish name, or HID service (0x1812)
 # plus Microsoft manufacturer data (0x0006) — the name is often missing at first.
 gamepads(){
-  awk 'index($0,">>> scan le")==1{on=1; next}
-    on && match($0, /Device ([0-9A-F][0-9A-F]:){5}[0-9A-F][0-9A-F]/){
+  since "scan le" | RE=$PAD_RE awk 'match($0, /Device ([0-9A-F][0-9A-F]:){5}[0-9A-F][0-9A-F]/){
       m=substr($0, RSTART+7, 17); if(!(m in seen)){seen[m]=1; order[++n]=m}
       if($0 ~ /\[NEW\] Device/ && tolower($0) ~ /xbox|controller|gamepad/) pad[m]=1
-      if($0 ~ /Appearance: 0x03c4|Icon: input-gaming/) pad[m]=1
+      if($0 ~ ENVIRON["RE"]) pad[m]=1
       if($0 ~ /UUIDs: 00001812-/) hid[m]=1
       if($0 ~ /ManufacturerData\.Key: 0x0006 /) ms[m]=1
     }
-    END{for(i=1;i<=n;i++){m=order[i]; if(pad[m] || (hid[m] && ms[m])) print m}}' "$L" |
+    END{for(i=1;i<=n;i++){m=order[i]; if(pad[m] || (hid[m] && ms[m])) print m}}' |
     grep -vxF -f <(echo "$PAIRED")
 }
 
-if [ -n "$ADDR" ]; then send "select $ADDR"; fi
-send "power on";        wait_for "power on" 'power on succeeded' 5
-send "default-agent";   wait_for "default-agent" 'Default agent request successful' 5
-for m in $MAC $STALE; do
-  send "remove $m";     wait_for "remove $m" 'has been removed|not available' 5
-done
+[ -n "$ADDR" ] && send "select $ADDR"
+run "power on" 'power on succeeded'
+run "default-agent" 'Default agent request successful'
+for m in $MAC $STALE; do run "remove $m" 'has been removed|not available'; done
 send "scan le"
 
 SCAN_SECS=${SCAN_SECS:-180}   # override for testing
 GRACE=${GRACE:-5}             # after another gamepad shows up, wait this long for <MAC>
-step scan "Put the controller in pairing mode now (Xbox: hold the pair button until the logo flashes fast)."
-msg "Listening for up to $((SCAN_SECS / 60)) minutes${MAC:+ (preferring $MAC)}..."
+step scan "Pairing mode now: hold the pair button until the logo flashes fast."
+msg "Listening up to $((SCAN_SECS / 60)) min${MAC:+, preferring $MAC}"
 
-# Pick the controller: <MAC> as soon as it shows up; otherwise the only gamepad seen
-# for GRACE seconds. Several at once is ambiguous — name one on the command line.
-PICK=""; REASON=""; FIRST=""; T=0
-while (( T < SCAN_SECS * 2 )); do
-  answer_prompts
-  if [ -n "$MAC" ] && seen "scan le" "\[NEW\] Device $MAC"; then step scan; step preferred; PICK=$MAC; break; fi
-  PADS=$(gamepads)
-  if [ -n "$PADS" ]; then
-    [ -z "$FIRST" ] && { FIRST=$T; step preferred; step others "gamepad seen: ${PADS//$'\n'/ } — waiting ${GRACE} s for the preferred one"; }
-    if (( T - FIRST >= GRACE * 2 )); then
-      if [ "$(wc -l <<<"$PADS")" -eq 1 ]; then PICK=$PADS
-      else REASON="several gamepads in pairing mode: ${PADS//$'\n'/ } — run again with the one to pair"; fi
-      break
-    fi
-  fi
-  sleep 0.5; T=$((T + 1))
-done
-[ -n "$PICK$REASON" ] || { step preferred; step others; REASON="no controller seen${MAC:+ ($MAC)}"; }
+# pick: <MAC> as soon as it shows up; otherwise the only gamepad seen for GRACE
+# seconds. Several at once is ambiguous — name one on the command line.
+PICK=""; REASON=""; FIRST=""
+pick(){
+  [ -n "$MAC" ] && seen "scan le" "\[NEW\] Device $MAC" && { PICK=$MAC; return 0; }
+  mapfile -t PADS < <(gamepads)
+  (( ${#PADS[@]} )) || return 1
+  [ -n "$FIRST" ] || { FIRST=$SECONDS; msg "gamepad seen: ${PADS[*]} — waiting ${GRACE} s for the preferred one"; }
+  (( SECONDS - FIRST >= GRACE )) || return 1
+  if (( ${#PADS[@]} == 1 )); then PICK=${PADS[0]}
+  else REASON="several gamepads in pairing mode: ${PADS[*]} — run again with the one to pair"; fi
+}
+poll "$SCAN_SECS" pick || REASON="no controller seen${MAC:+ ($MAC)}"
 
 if [ -n "$PICK" ]; then
-  step pair "Controller $PICK seen — pairing (scan stays on)..."
-  send "pair $PICK"
-  wait_for "pair $PICK" 'Pairing successful|Failed to pair|not available' 30
-  step paired
-  if ! seen "pair $PICK" 'Pairing successful'; then
-    REASON="pairing failed"
-  else
-    step connect
-    send "trust $PICK";   wait_for "trust $PICK" 'trust succeeded' 5
-    send "connect $PICK"; wait_for "connect $PICK" 'Connection successful|Failed to connect' 20
+  step pair "Pairing $PICK (scan stays on)"
+  run "pair $PICK" 'Pairing successful|Failed to pair|not available' 30
+  if seen "pair $PICK" 'Pairing successful'; then
+    run "trust $PICK" 'trust succeeded'
+    run "connect $PICK" 'Connection successful|Failed to connect' 20
     wait_for "connect $PICK" 'ServicesResolved: yes' 10   # let HID setup finish before scan off
-    step verify
+  else
+    REASON="pairing failed"
   fi
 fi
-send "scan off";        wait_for "scan off" 'Discovery stopped' 5
-[ -n "$PICK" ] && { send "info $PICK"; wait_for "info $PICK" 'Connected: (yes|no)|not available' 5; }
+run "scan off" 'Discovery stopped'
+[ -n "$PICK" ] && run "info $PICK" 'Connected: (yes|no)|not available'
 send "quit"; exec 3>&-; wait
 
 # Success = an input device exists for the controller (BlueZ sets its uniq to the
 # device address). Paired+connected without one is the HID-over-GATT setup failing
 # before encryption ("Report Map read failed"), which bluetoothd won't retry.
 INPUT_DEVICES=${INPUT_DEVICES:-/proc/bus/input/devices}   # override for testing
-has_input(){ local n=$(( $2 * 2 )); while (( n-- > 0 )); do grep -qix "U: Uniq=$1" "$INPUT_DEVICES" && return 0; sleep 0.5; done; return 1; }
-
 if [ -n "$PICK" ] && seen "info $PICK" 'Paired: yes' && seen "info $PICK" 'Connected: yes'; then
   step input
-  [ -n "$MAC" ] && [ "$PICK" != "$MAC" ] && msg "Note: paired $PICK, not $MAC. To make it the default, set MAC=$PICK in $CONF"
-  [ -z "$MAC" ] && msg "Tip: set MAC=$PICK in $CONF to prefer this controller next time"
-  if has_input "$PICK" 10; then
+  HINT=""
+  [ -n "$MAC" ] && [ "$PICK" != "$MAC" ] && HINT="Note: paired $PICK, not $MAC — set MAC=$PICK in ${CONF/#$HOME/\~} to prefer it"
+  [ -z "$MAC" ] && HINT="Tip: set MAC=$PICK in ${CONF/#$HOME/\~} to prefer this controller"
+  if poll 10 grep -qix "U: Uniq=$PICK" "$INPUT_DEVICES"; then
     step ok "Paired and connected ($PICK)."
+    [ -n "$HINT" ] && msg "$HINT"
     notify input-gaming "Paired and connected"
     exit 0
   fi
@@ -264,9 +249,9 @@ if [ -n "$PICK" ] && seen "info $PICK" 'Paired: yes' && seen "info $PICK" 'Conne
   exit 3
 fi
 step fail "Pairing did not complete${REASON:+: $REASON}."
-# errors from the scan onwards (the startup "remove" replies "not available" are expected)
-while read -r l; do msg "${l#\[bluetoothctl\]> }"; done < <(awk 'index($0,">>> scan le")==1{on=1} on' "$L" |
-  grep -aE "Failed to pair|Failed to connect|not available")
+# errors from the scan on (the startup "remove" replies "not available" are expected)
+ERRS=$(since "scan le" | grep -aE "Failed to pair|Failed to connect|not available")
+[ -n "$ERRS" ] && msg "$ERRS"
 msg "Full bluetoothctl log: $L"
 notify dialog-error "Pairing failed — see the terminal"
 exit 1
