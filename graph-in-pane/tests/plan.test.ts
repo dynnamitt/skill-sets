@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { isPlanningSkill, PLAN_SECTION_ID, planTransition } from '../hooks/lib/plan'
+import { isPlanningSkill, PLAN_SECTION_ID, PLAN_TEXT, planTransition } from '../hooks/lib/plan'
 import type { PlanState } from '../types'
 import { type Engine, type On, runCommand, world } from './world'
 
@@ -76,4 +76,10 @@ test('plan mode from shift+tab switches planning on', async ($, on) => {
   await $.classic.UserPromptSubmit({ prompt: 'plan this', permission_mode: 'plan' } as never)
   const { sections } = await compose($)
   expect(sections.map(s => s.id)).toContain(PLAN_SECTION_ID)
+})
+
+test('the plan instruction says show_graph is allowed in plan mode and when to call it', async () => {
+  expect(PLAN_TEXT).toContain('changes no files')
+  expect(PLAN_TEXT).toContain('plan mode')
+  expect(PLAN_TEXT).toContain('before ExitPlanMode')
 })

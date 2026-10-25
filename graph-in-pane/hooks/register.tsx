@@ -141,7 +141,7 @@ async function handleShowGraph($: EngineInterface, input: Record<string, unknown
     await update($, planAtom, plan => ({ ...(plan ?? EMPTY_PLAN), latest: view }))
     if (nav.stack.length > 0 && nav.stack[0]?.mode !== 'plan') {
       $.ui.status(RESULT.status)
-      return { result: RESULT.shown }
+      return { result: RESULT.stored }
     }
   }
   const how = parsed.kind === 'flow' && top?.waiting === true && top.target === parsed.target ? 'replaceTop' : 'reset'

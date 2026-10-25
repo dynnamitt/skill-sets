@@ -3,7 +3,7 @@ import type { PlanState } from '../../types'
 export const PLAN_SECTION_ID = 'graph-in-pane:plan'
 
 export const PLAN_TEXT =
-  'graph-in-pane: a planning conversation is active. Keep a top-down box-and-arrow picture of the plan under discussion in the user\'s side pane: call mcp__graph-in-pane__show_graph with kind "plan", a short title and a Graphviz digraph (no styling; the pane styles it). Call it when the plan\'s boxes or arrows change, not every turn. Keep it under about 15 nodes with labels of a few words.'
+  'graph-in-pane: a planning conversation is active. Keep a top-down box-and-arrow picture of the plan under discussion in the user\'s side pane: call mcp__graph-in-pane__show_graph with kind "plan", a short title and a Graphviz digraph (no styling; the pane styles it). The tool only draws in the pane and changes no files, so it is allowed in plan mode. Call it as soon as the plan has a shape (in plan mode, before ExitPlanMode), and again when its boxes or arrows change, not every turn. Keep it under about 15 nodes with labels of a few words.'
 
 export type PlanEvent =
   | { type: 'skill' }

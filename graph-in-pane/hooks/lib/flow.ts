@@ -42,6 +42,7 @@ export const RESULT = {
   shown: 'shown in the graph pane',
   hidden: 'drawn; the pane is not visible (narrow terminal), the user was told to run /graph',
   status: 'plan graph updated · /graph',
+  stored: 'saved as the latest plan graph; the user is browsing another graph and was told to run /graph',
 } as const
 
 export type ShowGraph = { kind: Extract<Mode, 'plan' | 'flow'>; title: string; dot: string; target: string; openable: Openable[] }
