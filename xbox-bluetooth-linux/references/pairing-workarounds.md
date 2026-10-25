@@ -133,29 +133,36 @@ The script removes any existing bond for `<MAC>` first, so it is for
 
 ## Live flowchart (kitty)
 
-[../scripts/ble-pair.dot](../scripts/ble-pair.dot) is a flowchart of the script,
-laid out left to right to suit a landscape terminal. Render it with
-`dot -Tpng ble-pair.dot -o ble-pair.png`.
+[../scripts/ble-pair.dot](../scripts/ble-pair.dot) is a seven-node flowchart of
+the script: Prepare → Scan → Pair → Input device?, with outcomes on a second row
+(Failed, Done, No input device). Render it with `dot -Tpng ble-pair.dot -o ble-pair.png`.
+It is kept small on purpose: two rows sit close to a terminal's aspect ratio, so
+the chart scales up to large text.
 
 When the script runs in kitty and Graphviz is installed, the terminal shows only
-this chart. The script re-renders it at every step and draws it full-window with
-the kitty graphics protocol (`kitten icat --place`):
+this chart, drawn full-window with the kitty graphics protocol (`kitten icat --place`):
 
-- **Current step:** amber.
-- **Visited steps and the edges taken:** green.
-- **End node:** green (exit 0), orange (exit 3) or red (exit 1).
-- **Caption:** the current messages, so failure reasons and the log path stay
-  visible.
+- **Visited steps and the edges between them:** green.
+- **Current or end node:** amber while running, then green (exit 0), orange
+  (exit 3) or red (exit 1).
+- **Caption:** the current messages, wrapped at 60 characters, so failure
+  reasons and the log path stay visible.
+
+How it is drawn:
+
+- `step`/`msg` only record state. The chart is re-rendered at the next wait
+  and on exit, so a burst of steps draws once.
+- It is rendered at the window's pixel size (`kitten icat --print-window-size`,
+  `dot -Gsize=…!`) and re-rendered when the window is resized.
 
 It falls back to plain text off a terminal, outside kitty, without `dot`, or with
-`FLOWCHART=0`; then the messages are printed as text. `FLOW_DPI` sets the render
-resolution (default 150). Desktop sessions often lack Homebrew on `PATH`, so
-the script also looks for `dot` in `/home/linuxbrew/.linuxbrew/bin`.
+`FLOWCHART=0`; then the messages are printed as text. Desktop sessions often lack
+Homebrew on `PATH`, so the script also looks for `dot` in
+`/home/linuxbrew/.linuxbrew/bin`.
 
-The script adds node and edge attributes before the DOT's closing brace, so
-keep `}` as the last line and keep node ids in sync with the script's `step`
-calls. `strict digraph` merges a repeated edge into the existing one, and that
-is how the path taken gets recoloured.
+The script appends attributes for its trail of node ids before the DOT's closing
+`}` (at column 0). `strict digraph` merges those repeated edges into the existing
+ones. Keep node ids in sync with the script's `step` calls.
 
 ## Desktop launcher (optional)
 
