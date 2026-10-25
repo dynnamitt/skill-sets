@@ -48,6 +48,7 @@ test('without ast-grep, extraction falls back to tree-sitter and an nvim parser'
     env: async () => undefined,
     list: async () => [],
     read: async () => PAIR_SOURCE,
+    bytes: async () => '',
   }
   const sk = await extractFile(host, { 'tree-sitter': '/usr/bin/tree-sitter' }, '/fx/pair.sh', 'bash', ['/parsers'])
   expect(isFailure(sk) ? sk.error : sk.fns.map(fn => fn.name)).toEqual(['scan', 'pick'])

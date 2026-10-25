@@ -44,6 +44,7 @@ const fakeHost = (onPath: Record<string, string>, files: readonly string[], log:
   env: async name => (name === 'HOME' ? '/home/u' : undefined),
   list: async () => [],
   read: async () => '',
+  bytes: async () => '',
 })
 
 test('a tool on PATH is found with command -v', async () => {

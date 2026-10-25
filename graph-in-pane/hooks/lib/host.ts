@@ -10,6 +10,8 @@ export type Host = {
   env: (name: EnvName) => Promise<string | undefined>
   list: (dir: string) => Promise<readonly FsEntry[]>
   read: (path: string) => Promise<string>
+  /** A file's bytes, base64. */
+  bytes: (path: string) => Promise<string>
 }
 
 // A function declaration: the engine follows `$` past an import only into one.
@@ -19,6 +21,7 @@ export function hostOf($: EngineInterface): Host {
     exists: path => $.fs.exists(path),
     list: dir => $.fs.list(dir),
     read: path => $.fs.read(path),
+    bytes: async path => (await $.fs.read(path, { as: 'bytes' })).base64,
     env: name =>
       name === 'HOME'
         ? $.env.get('HOME')

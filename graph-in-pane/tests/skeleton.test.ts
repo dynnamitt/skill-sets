@@ -74,6 +74,7 @@ const treeHost = (tree: Record<string, ReturnType<typeof entry>[]>, files: reado
   env: async () => undefined,
   list: async dir => tree[dir] ?? [],
   read: async () => '',
+  bytes: async () => '',
 })
 
 test('a big dir skips ignored folders and caps at 200 files', async () => {
