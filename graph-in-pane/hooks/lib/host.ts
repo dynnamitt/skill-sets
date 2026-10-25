@@ -9,6 +9,7 @@ export type Host = {
   exists: (path: string) => Promise<boolean>
   env: (name: EnvName) => Promise<string | undefined>
   list: (dir: string) => Promise<readonly FsEntry[]>
+  read: (path: string) => Promise<string>
 }
 
 // A function declaration: the engine follows `$` past an import only into one.
@@ -17,6 +18,7 @@ export function hostOf($: EngineInterface): Host {
     run: (argv, init) => $.process.run(argv, init),
     exists: path => $.fs.exists(path),
     list: dir => $.fs.list(dir),
+    read: path => $.fs.read(path),
     env: name =>
       name === 'HOME'
         ? $.env.get('HOME')

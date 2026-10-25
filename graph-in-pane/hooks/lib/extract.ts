@@ -1,7 +1,8 @@
 import type { Tools } from '../../types'
+import { fallbackRows } from './fallback'
 import type { Host } from './host'
 import { RULES } from './rules'
-import { type FileSkeleton, fileSkeleton, type Lang, langOf, type Skeleton, specsOf, toRows } from './skeleton'
+import { type AstRow, type FileSkeleton, fileSkeleton, type Lang, langOf, type Skeleton, specsOf, toRows } from './skeleton'
 
 export const MAX_FILES = 200
 const IGNORED_DIRS: ReadonlySet<string> = new Set(['node_modules', 'dist', 'build', 'target', '.venv'])
@@ -55,21 +56,28 @@ export const listSourceFiles = async (host: Host, dir: string): Promise<{ files:
   return { files: all.slice(0, MAX_FILES), omitted: Math.max(0, all.length - MAX_FILES) }
 }
 
-/** Runs ast-grep on one file and builds its skeleton. */
+const astGrepRows = async (host: Host, astGrep: string, file: string, lang: Lang): Promise<AstRow[] | Failure> => {
+  const { exitCode, stdout, stderr } = await host.run([astGrep, 'scan', '--inline-rules', RULES[lang], '--json=stream', file], {
+    stdin: '',
+    timeoutMs: 30000,
+  })
+  return exitCode !== 0 && stdout.trim() === '' ? { error: `ast-grep failed: ${stderr.split('\n')[0] ?? ''}` } : toRows(stdout)
+}
+
+/** One file's skeleton: ast-grep, else the tree-sitter CLI with a parser from `parserDirs`. */
 export const extractFile = async (
   host: Host,
   tools: Tools,
   file: string,
   lang: Lang,
+  parserDirs: readonly string[] = [],
 ): Promise<FileSkeleton | Failure> => {
   const astGrep = tools['ast-grep']
-  if (astGrep === undefined) return { error: 'ast-grep not found' }
-  const { exitCode, stdout, stderr } = await host.run([astGrep, 'scan', '--inline-rules', RULES[lang], '--json=stream', file], {
-    stdin: '',
-    timeoutMs: 30000,
-  })
-  if (exitCode !== 0 && stdout.trim() === '') return { error: `ast-grep failed: ${stderr.split('\n')[0] ?? ''}` }
-  const rows = toRows(stdout)
+  const rows =
+    astGrep === undefined
+      ? await fallbackRows(host, tools, parserDirs, file, lang)
+      : await astGrepRows(host, astGrep, file, lang)
+  if (isFailure(rows)) return rows
   const resolve = ownResolver(host)
   const resolved = new Map(
     await Promise.all(specsOf(rows, lang).map(async spec => [spec, await resolve(file, spec)] as const)),
@@ -83,16 +91,17 @@ export const extractTarget = async (
   tools: Tools,
   path: string,
   isDir: boolean,
+  parserDirs: readonly string[] = [],
 ): Promise<Skeleton | Failure> => {
   if (!isDir) {
     const lang = langOf(path)
     if (lang === null) return { error: `no grammar for ${path.includes('.') ? path.slice(path.lastIndexOf('.')) : path}` }
-    const file = await extractFile(host, tools, path, lang)
+    const file = await extractFile(host, tools, path, lang, parserDirs)
     return isFailure(file) ? file : { root: dirOf(path), files: [file], omitted: 0 }
   }
   const { files, omitted } = await listSourceFiles(host, path)
   if (files.length === 0) return { error: `no bash, TypeScript or JavaScript files under ${path}` }
-  const skeletons = await Promise.all(files.map(file => extractFile(host, tools, file, langOf(file) as Lang)))
+  const skeletons = await Promise.all(files.map(file => extractFile(host, tools, file, langOf(file) as Lang, parserDirs)))
   const failed = skeletons.find(isFailure)
   return failed !== undefined && skeletons.every(isFailure)
     ? failed
