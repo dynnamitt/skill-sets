@@ -15,7 +15,7 @@ description: >
   Linux — even if they only say "my controller won't connect over bluetooth".
 metadata:
   author: kdm
-  version: "1.2.1"
+  version: "1.3.0"
   verified: "2026-10 — kernel 7.2.7, BlueZ 5.87, Bazzite 44 (Fedora 44)"
 ---
 
@@ -72,6 +72,7 @@ journal" usually yields an empty result. Real evidence comes from scans and
 | Pairs, then drops during play | Wi-Fi band, USB autosuspend, distance | Coexistence / power management |
 | Logo goes solid in ~1 s but PC shows nothing | Something else grabbed it | Another host (console, phone, TV) |
 | Paired + connected, logo solid, but no gamepad in Steam / no `js` node; journal `Report Map read failed: … unlikely error` | `grep -A4 'Xbox Wireless' /proc/bus/input/devices` | HID-over-GATT setup ran before encryption and bluetoothd won't retry — restart bluetooth (or reboot), then press the Xbox button |
+| Pairing script / saved config "never sees" the controller, but a scan shows another `Xbox Wireless Controller` | `bluetoothctl devices`, compare with the configured address | New or replaced controller, so a new address. `ble-pair.sh` ≥ 1.3 picks it up on its own; update the saved address |
 | Was paired, now won't reconnect; journal loops `HID Information read failed: … unlikely error` | `btmon`: `Encryption Change … PIN or Key Missing (0x06)` | Controller lost its bond (paired elsewhere, or a pairing attempt via the wrong adapter) — re-pair |
 
 Comparative signals beat absolute ones. Useful comparisons:
@@ -91,7 +92,7 @@ in pairing mode: it advertises Microsoft manufacturer data (company id
 `0x0006`), appearance `0x03c4` (gamepad) and the HID UUID `0x1812`. The name
 may be missing from early advertisements, so match on those fields, not on
 "Xbox" in the name. Microsoft OUIs include `A8:8C:3E`, `98:7A:14`, `44:16:22`,
-`C8:3F:26` — confirm via `https://api.macvendors.com/<prefix>`.
+`C8:3F:26`, `14:CB:65` — confirm via `https://api.macvendors.com/<prefix>`.
 
 ## Step 3 — Fixes, in order of evidence
 
