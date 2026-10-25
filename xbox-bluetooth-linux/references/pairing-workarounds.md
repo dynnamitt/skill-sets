@@ -71,9 +71,24 @@ scan off
 Bundled as [../scripts/ble-pair.sh](../scripts/ble-pair.sh):
 
 ```bash
-scripts/ble-pair.sh <MAC>                                          # single adapter
+scripts/ble-pair.sh                                                # find the gamepad in pairing mode
+scripts/ble-pair.sh <MAC>                                          # prefer this controller
 scripts/ble-pair.sh <MAC> --adapter 2357:0604 --disable 8087:0aaa  # pair via the dongle, block onboard Intel
 ```
+
+`<MAC>` is a preference, not a requirement. A fixed address was the script's
+weak spot: a replaced controller has a new address and was never picked up. Now:
+
+- `<MAC>` is paired as soon as it shows up.
+- Otherwise the script takes the only *unpaired* gamepad seen in pairing mode,
+  after a grace period (`GRACE`, 5 s). Gamepad means a gamepad name or
+  appearance, or HID service `0x1812` plus Microsoft manufacturer data `0x0006`,
+  because the name is often missing from the first advertisements. It then
+  prints the new address, for the config.
+- Several gamepads at once is ambiguous: it lists them and stops.
+- Paired gamepads are never picked or touched, except `<MAC>`.
+- Before scanning it forgets cached *unpaired* gamepads, so they come back as
+  `[NEW]` with their full advertisement.
 
 Machine-specific defaults can go in `~/.config/ble-pair.conf` (a bash snippet;
 CLI arguments override it). Then the script runs without arguments, can be
@@ -92,7 +107,11 @@ pairing itself — e.g. while in a trusted-but-unpaired state — makes the agen
 swallow the next queued command as its answer and silently refuse.
 
 Start it **before** the user presses the pair button; it listens for up to
-3 minutes. Success looks like `Pairing successful` → `Connection successful`,
+3 minutes. It counts as success only once an input device exists for the
+controller (`U: Uniq=<MAC>` in `/proc/bus/input/devices`). Paired and connected
+without one exits with code 3 and the bluetooth-restart fix. That is the
+"Report Map read failed" case in [diagnostics.md](diagnostics.md).
+In bluetoothctl it looks like `Pairing successful` → `Connection successful`,
 then in `dmesg`:
 
 ```
@@ -109,7 +128,7 @@ acts on `[default]`, which after a reboot may be the (blocked) onboard adapter.
 Putting the controller in pairing mode for a pairing that then runs on the wrong
 adapter costs the controller its existing bond (seen in the case study).
 
-The script removes any existing bond for that MAC first, so it is for
+The script removes any existing bond for `<MAC>` first, so it is for
 (re-)pairing only — normal use is just pressing the Xbox button.
 
 ## Desktop launcher (optional)
