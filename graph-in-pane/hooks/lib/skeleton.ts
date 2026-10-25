@@ -40,7 +40,13 @@ export const toRows = (input: string | readonly JsonRow[]): AstRow[] =>
     ? input
         .split('\n')
         .filter(line => line.trim() !== '')
-        .map(line => JSON.parse(line) as JsonRow)
+        .flatMap(line => {
+          try {
+            return [JSON.parse(line) as JsonRow]
+          } catch {
+            return []
+          }
+        })
     : input
   ).map(row => ({ ruleId: row.ruleId, text: row.text, start: row.range.start, end: row.range.end }))
 
@@ -143,3 +149,34 @@ export const fileSkeleton = (
   const calls = lang === 'bash' ? bashCalls(rows, fns) : scriptCalls(rows, fns)
   return { file, lang, fns, calls, exits, deps }
 }
+
+/** The skeleton narrowed to one function of one file: what it calls, exits and sources. */
+export const narrow = (sk: Skeleton, file: string, fn: string): Skeleton => ({
+  ...sk,
+  files: sk.files
+    .filter(f => f.file === file)
+    .map(f => ({
+      ...f,
+      fns: f.fns.filter(x => x.name === fn),
+      calls: f.calls.filter(call => call.from === fn),
+      exits: f.exits.filter(exit => exit.from === fn),
+      deps: f.deps.filter(dep => dep.from === fn),
+    })),
+})
+
+export type FileSummary = { file: string; lang: Lang; fns: string[]; ownDeps: string[]; externals: number; exits: (number | null)[] }
+
+/** A dir's skeleton cut down to one line per file, so a big dir stays small for the model. */
+export const summarize = (sk: Skeleton): { root: string; summary: true; omitted: number; files: FileSummary[] } => ({
+  root: sk.root,
+  summary: true,
+  omitted: sk.omitted,
+  files: sk.files.map(f => ({
+    file: f.file,
+    lang: f.lang,
+    fns: f.fns.map(fn => fn.name),
+    ownDeps: [...new Set(f.deps.flatMap(dep => (dep.resolved === null ? [] : [dep.resolved])))],
+    externals: new Set(f.calls.filter(call => call.kind === 'external').map(call => call.to)).size,
+    exits: [...new Set(f.exits.map(exit => exit.code))],
+  })),
+})

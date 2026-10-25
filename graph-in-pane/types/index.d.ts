@@ -1,4 +1,4 @@
-export type ToolName = 'dot' | 'ast-grep' | 'tree-sitter' | 'nvim'
+export type ToolName = 'dot' | 'ast-grep' | 'tree-sitter' | 'nvim' | 'unflatten'
 /** Absolute paths of the host tools that were found. */
 export type Tools = Readonly<Partial<Record<ToolName, string>>>
 
@@ -29,7 +29,10 @@ export type Nav = { stack: View[] }
 
 export type PlanState = { active: boolean; source: 'skill' | 'planmode' | null; latest: View | null }
 
-export type Meta = { cwd: string; sessionTag: string; cacheDir: string; gen: number; parserDirs: string[] }
+/** Install lines for the detected distro, shown when a tool is missing. */
+export type Hints = { dot: string; astGrep: string }
+
+export type Meta = { cwd: string; sessionTag: string; cacheDir: string; gen: number; parserDirs: string[]; hints: Hints }
 
 declare module 'claude-code' {
   interface PluginState {

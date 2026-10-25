@@ -21,8 +21,9 @@ export const paneTree = (t: Elements[RenderSurface], nav: Nav, ctx: PaneCtx, act
   const keys = pageOf(view)
   const hasKeys = keys.length > 0 || nav.stack.length > 1
   const box = view.px === null ? null : fitBox(view.px, { columns: ctx.bodyColumns, rows: Math.max(4, ctx.rows - CHROME_ROWS) })
+  // An error over a picture that drew before (a bad save of a followed .dot) keeps the picture.
   const picture =
-    view.error !== null ? (
+    view.error !== null && view.png === null ? (
       <Text color="red">{view.error}</Text>
     ) : view.waiting ? (
       <Text dimColor>asking Claude…</Text>
@@ -48,6 +49,7 @@ export const paneTree = (t: Elements[RenderSurface], nav: Nav, ctx: PaneCtx, act
         <Text>{nav.stack.map(v => v.title).join(' › ')}</Text>
       </Box>
       {picture}
+      {view.error !== null && view.png !== null && <Text color="red">{view.error}</Text>}
       {keys.length > 0 && (
         <Box flexDirection="row" flexWrap="wrap" gap={2}>
           {keys.map(k => (

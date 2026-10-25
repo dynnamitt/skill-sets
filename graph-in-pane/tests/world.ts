@@ -25,12 +25,25 @@ export type World = {
   status: (string | undefined)[]
   placed: boolean
   clock: ReturnType<typeof mock.clock>
+  /** Dirs whose listing fails with EACCES. */
+  denied: string[]
+  /** Leave dot off PATH. */
+  noDot: boolean
+  /** dot's run rejects, as a timeout does. */
+  dotRejects: boolean
+  /** dot exits 0 but writes no png. */
+  noPng: boolean
+  /** Every argv the plugin ran. */
+  runs: string[][]
 }
 
 /** Answers every host call the plugin makes from memory: files, ast-grep, dot, state, ui. */
 export const world = (on: On, files: Record<string, FakeFile>): World => {
   const clock = mock.clock(on, { now: 1000 })
-  const w: World = { files, dotInputs: [], dotFails: null, state: {}, writes: [], submitted: [], status: [], placed: true, clock }
+  const w: World = {
+    files, dotInputs: [], dotFails: null, state: {}, writes: [], submitted: [], status: [], placed: true, clock,
+    denied: [], noDot: false, dotRejects: false, noPng: false, runs: [],
+  }
   mock.env(on, { HOME: '/h' })
   on('fs.exists', (_, e) => ({ value: e.path in w.files }))
   on('fs.stat', (_, e) => {
@@ -38,22 +51,37 @@ export const world = (on: On, files: Record<string, FakeFile>): World => {
     if (file === undefined) throw new Error(`ENOENT: ${e.path}`)
     return { value: { kind: file.kind, size: (file.text ?? '').length, mtimeMs: file.mtimeMs ?? 0, isLink: false } }
   })
-  on('fs.list', (_, e) => ({
-    value: Object.entries(w.files)
+  on('fs.list', (_, e) => {
+    if (w.denied.includes(e.path)) throw new Error(`EACCES: ${e.path}`)
+    return { value: Object.entries(w.files)
       .filter(([path]) => path.startsWith(`${e.path}/`) && !path.slice(e.path.length + 1).includes('/'))
-      .map(([path, file]) => ({ name: path.slice(e.path.length + 1), kind: file.kind, size: 1, mtimeMs: file.mtimeMs ?? 0, isLink: false })),
-  }))
-  on('fs.read', (_, e) =>
-    e.as === 'bytes' ? { value: { base64: PNG_600x400 } } : { value: w.files[e.path]?.text ?? '' },
-  )
+      .map(([path, file]) => ({ name: path.slice(e.path.length + 1), kind: file.kind, size: 1, mtimeMs: file.mtimeMs ?? 0, isLink: false })) }
+  })
+  on('fs.read', (_, e) => {
+    if (e.as === 'bytes') {
+      if (w.noPng) throw new Error(`ENOENT: ${e.path}`)
+      return { value: { base64: PNG_600x400 } }
+    }
+    const file = w.files[e.path]
+    if (file === undefined || file.kind === 'dir') throw new Error(`EISDIR or ENOENT: ${e.path}`)
+    return { value: file.text ?? '' }
+  })
   on('process.run', (_, e) => {
     const [cmd, ...rest] = e.argv
-    if (cmd === 'sh') return rest[1] === 'command -v ast-grep' ? ok('/bin/ast-grep\n') : rest[1] === 'command -v dot' ? ok('/bin/dot\n') : ok('', 1)
+    w.runs.push([...e.argv])
+    if (cmd === 'sh') {
+      const found: Record<string, string> = { 'ast-grep': '/bin/ast-grep', unflatten: '/bin/unflatten', ...(w.noDot ? {} : { dot: '/bin/dot' }) }
+      const name = (rest[1] ?? '').replace('command -v ', '')
+      return name in found ? ok(`${found[name]}\n`) : ok('', 1)
+    }
     if (cmd === '/bin/ast-grep') {
       const file = rest[rest.length - 1] ?? ''
+      if (file.endsWith('big.sh')) return { value: { exitCode: 0, stdout: '{"ruleId":"fn","text":"a() {', stderr: '', isStdoutTruncated: true, isStderrTruncated: false } }
       return ok(file.endsWith('pair.sh') ? PAIR.map(row => JSON.stringify(row)).join('\n') : '')
     }
+    if (cmd === '/bin/unflatten') return ok(`${e.init?.stdin ?? ''}\n// unflattened`)
     if (cmd === '/bin/dot') {
+      if (w.dotRejects) throw new Error('timed out after 15000 ms')
       w.dotInputs.push(e.init?.stdin ?? '')
       return w.dotFails === null ? ok() : ok('', 1, w.dotFails.stderr)
     }

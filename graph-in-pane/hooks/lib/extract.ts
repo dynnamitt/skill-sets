@@ -1,6 +1,6 @@
 import type { Tools } from '../../types'
 import { fallbackRows } from './fallback'
-import type { Host } from './host'
+import { type Host, safely } from './host'
 import { RULES } from './rules'
 import { type AstRow, type FileSkeleton, fileSkeleton, type Lang, langOf, type Skeleton, specsOf, toRows } from './skeleton'
 
@@ -41,7 +41,8 @@ export const ownResolver =
 /** The source files under a dir, ignored dirs skipped, sorted, capped at MAX_FILES. */
 export const listSourceFiles = async (host: Host, dir: string): Promise<{ files: string[]; omitted: number }> => {
   const walk = async (at: string): Promise<string[]> => {
-    const entries = [...(await host.list(at))].sort((a, b) => a.name.localeCompare(b.name))
+    // An unreadable folder is skipped, not fatal.
+    const entries = [...(await host.list(at).catch(() => []))].sort((a, b) => a.name.localeCompare(b.name))
     const nested = await Promise.all(
       entries
         .filter(entry => entry.kind === 'dir' && !entry.name.startsWith('.') && !IGNORED_DIRS.has(entry.name))
@@ -57,10 +58,11 @@ export const listSourceFiles = async (host: Host, dir: string): Promise<{ files:
 }
 
 const astGrepRows = async (host: Host, astGrep: string, file: string, lang: Lang): Promise<AstRow[] | Failure> => {
-  const { exitCode, stdout, stderr } = await host.run([astGrep, 'scan', '--inline-rules', RULES[lang], '--json=stream', file], {
-    stdin: '',
-    timeoutMs: 30000,
-  })
+  const { exitCode, stdout, stderr, isStdoutTruncated } = await host.run(
+    [astGrep, 'scan', '--inline-rules', RULES[lang], '--json=stream', file],
+    { stdin: '', timeoutMs: 30000 },
+  )
+  if (isStdoutTruncated) return { error: `${file} is too large to graph (ast-grep output over 4 MiB)` }
   return exitCode !== 0 && stdout.trim() === '' ? { error: `ast-grep failed: ${stderr.split('\n')[0] ?? ''}` } : toRows(stdout)
 }
 
@@ -71,12 +73,16 @@ export const extractFile = async (
   file: string,
   lang: Lang,
   parserDirs: readonly string[] = [],
+  missing = 'ast-grep not found',
 ): Promise<FileSkeleton | Failure> => {
   const astGrep = tools['ast-grep']
-  const rows =
-    astGrep === undefined
-      ? await fallbackRows(host, tools, parserDirs, file, lang)
-      : await astGrepRows(host, astGrep, file, lang)
+  const rows = await safely<AstRow[] | Failure>(
+    () =>
+      astGrep === undefined
+        ? fallbackRows(host, tools, parserDirs, file, lang, missing)
+        : astGrepRows(host, astGrep, file, lang),
+    error => ({ error: `${file}: ${error}` }),
+  )
   if (isFailure(rows)) return rows
   const resolve = ownResolver(host)
   const resolved = new Map(
@@ -92,16 +98,17 @@ export const extractTarget = async (
   path: string,
   isDir: boolean,
   parserDirs: readonly string[] = [],
+  missing = 'ast-grep not found',
 ): Promise<Skeleton | Failure> => {
   if (!isDir) {
     const lang = langOf(path)
     if (lang === null) return { error: `no grammar for ${path.includes('.') ? path.slice(path.lastIndexOf('.')) : path}` }
-    const file = await extractFile(host, tools, path, lang, parserDirs)
+    const file = await extractFile(host, tools, path, lang, parserDirs, missing)
     return isFailure(file) ? file : { root: dirOf(path), files: [file], omitted: 0 }
   }
   const { files, omitted } = await listSourceFiles(host, path)
   if (files.length === 0) return { error: `no bash, TypeScript or JavaScript files under ${path}` }
-  const skeletons = await Promise.all(files.map(file => extractFile(host, tools, file, langOf(file) as Lang, parserDirs)))
+  const skeletons = await Promise.all(files.map(file => extractFile(host, tools, file, langOf(file) as Lang, parserDirs, missing)))
   const failed = skeletons.find(isFailure)
   return failed !== undefined && skeletons.every(isFailure)
     ? failed

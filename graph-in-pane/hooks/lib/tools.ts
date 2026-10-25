@@ -5,7 +5,7 @@ import type { Host } from './host'
 
 export type { ToolName, Tools }
 
-const TOOL_NAMES: readonly ToolName[] = ['dot', 'ast-grep', 'tree-sitter', 'nvim']
+const TOOL_NAMES: readonly ToolName[] = ['dot', 'ast-grep', 'tree-sitter', 'nvim', 'unflatten']
 
 const OPTION_OF: Readonly<Partial<Record<ToolName, string>>> = {
   dot: 'dotPath',

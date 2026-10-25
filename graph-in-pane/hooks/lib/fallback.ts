@@ -118,9 +118,10 @@ export const fallbackRows = async (
   dirs: readonly string[],
   file: string,
   lang: Lang,
+  missing = 'ast-grep not found',
 ): Promise<AstRow[] | Failure> => {
   const treeSitter = tools['tree-sitter']
-  if (treeSitter === undefined) return { error: 'neither ast-grep nor tree-sitter found' }
+  if (treeSitter === undefined) return { error: missing }
   const found = await Promise.all(
     dirs.map(async dir => ((await host.exists(`${dir}/${lang}.so`)) ? `${dir}/${lang}.so` : null)),
   )

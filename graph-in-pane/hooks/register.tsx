@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Meta, Nav, PlanState, View } from '../types'
+import type { Hints, Meta, Nav, PlanState, View } from '../types'
 import { redrawDot, type RenderCtx, renderView, resolveTarget, summary, treeView } from './lib/commands'
 import { styleDot } from './lib/dot'
 import { extractTarget, isFailure } from './lib/extract'
@@ -23,7 +23,8 @@ import { hostOf } from './lib/host'
 import { emptyView, type NavAction, navReduce, topOf } from './lib/nav'
 import { paneTree } from './lib/pane'
 import { isPlanningSkill, PLAN_SECTION_ID, PLAN_TEXT, type PlanEvent, planTransition } from './lib/plan'
-import { resolveTools, type Tools } from './lib/tools'
+import { installHint, resolveTools, type Tools } from './lib/tools'
+import { narrow, summarize } from './lib/skeleton'
 
 export const PANE_ID = 'graph'
 const DOT_POLL_MS = 1000
@@ -33,7 +34,8 @@ const DOT_POLL_MS = 1000
 const EMPTY_TOOLS: Tools = {}
 const EMPTY_NAV: Nav = { stack: [] }
 const EMPTY_PLAN: PlanState = { active: false, source: null, latest: null }
-const EMPTY_META: Meta = { cwd: '/', sessionTag: 'session', cacheDir: '/tmp/graph-in-pane', gen: 0, parserDirs: [] }
+const EMPTY_HINTS: Hints = { dot: 'dot not found (install Graphviz)', astGrep: 'ast-grep not found' }
+const EMPTY_META: Meta = { cwd: '/', sessionTag: 'session', cacheDir: '/tmp/graph-in-pane', gen: 0, parserDirs: [], hints: EMPTY_HINTS }
 
 const toolsAtom = atom({ plugin: 'graph-in-pane', key: 'tools' } as const, EMPTY_TOOLS, { shape: 'tools-1' })
 const navAtom = atom({ plugin: 'graph-in-pane', key: 'nav' } as const, EMPTY_NAV, { shape: 'nav-1' })
@@ -62,13 +64,26 @@ async function renderCtx($: EngineInterface): Promise<{ ctx: RenderCtx; gen: num
   await update($, metaAtom, meta => ({ ...(meta ?? EMPTY_META), gen: (meta ?? EMPTY_META).gen + 1 }))
   const meta = await read($, metaAtom)
   const tools = await read($, toolsAtom)
-  return { ctx: { tools, cacheDir: meta.cacheDir, sessionTag: meta.sessionTag, parserDirs: meta.parserDirs }, gen: meta.gen, meta }
+  return { ctx: ctxOf(meta, tools), gen: meta.gen, meta }
+}
+
+function ctxOf(meta: Meta, tools: Tools): RenderCtx {
+  return { tools, cacheDir: meta.cacheDir, sessionTag: meta.sessionTag, parserDirs: meta.parserDirs, hints: meta.hints ?? EMPTY_HINTS }
+}
+
+async function targetOf($: EngineInterface, args: string): Promise<string> {
+  const meta = await read($, metaAtom)
+  const home = (await $.env.get('HOME')) ?? ''
+  return resolveTarget(args, meta.cwd, home)
 }
 
 async function treeCommand($: EngineInterface, args: string): Promise<{ text: string }> {
-  const { ctx, gen, meta } = await renderCtx($)
-  const home = (await $.env.get('HOME')) ?? ''
-  const view = await treeView(hostOf($), ctx, resolveTarget(args, meta.cwd, home), gen)
+  return treeTarget($, await targetOf($, args))
+}
+
+async function treeTarget($: EngineInterface, target: string): Promise<{ text: string }> {
+  const { ctx, gen } = await renderCtx($)
+  const view = await treeView(hostOf($), ctx, target, gen)
   const nav = await read($, navAtom)
   await showView($, view, view.error !== null && nav.stack.length > 0 ? 'push' : 'reset')
   return { text: summary(view) }
@@ -83,7 +98,7 @@ async function flowAsk($: EngineInterface, target: string, how: 'reset' | 'push'
   const sk =
     stat === null
       ? { error: `not found: ${file}` }
-      : await extractTarget(host, ctx.tools, file, stat.kind === 'dir', ctx.parserDirs)
+      : await extractTarget(host, ctx.tools, file, stat.kind === 'dir', ctx.parserDirs, ctx.hints.astGrep)
   if (isFailure(sk)) {
     const view = { ...emptyView('flow', file, target), error: sk.error }
     await showView($, view, (await read($, navAtom)).stack.length > 0 ? 'push' : how)
@@ -96,9 +111,9 @@ async function flowAsk($: EngineInterface, target: string, how: 'reset' | 'push'
 }
 
 async function flowCommand($: EngineInterface, args: string): Promise<{ text: string }> {
-  const meta = await read($, metaAtom)
-  const home = (await $.env.get('HOME')) ?? ''
-  return flowAsk($, resolveTarget(args, meta.cwd, home), 'reset')
+  const target = await targetOf($, args)
+  // A .dot file is drawn as written by either command.
+  return target.endsWith('.dot') ? treeTarget($, target) : flowAsk($, target, 'reset')
 }
 
 async function openBox($: EngineInterface, n: number): Promise<void> {
@@ -117,13 +132,18 @@ async function openBox($: EngineInterface, n: number): Promise<void> {
 async function handleSkeleton($: EngineInterface, input: Record<string, unknown>) {
   const meta = await read($, metaAtom)
   const tools = await read($, toolsAtom)
-  const home = (await $.env.get('HOME')) ?? ''
-  const target = resolveTarget(typeof input.target === 'string' ? input.target : '', meta.cwd, home)
+  const [file = '', fn] = (await targetOf($, typeof input.target === 'string' ? input.target : '')).split('#')
   const host = hostOf($)
-  const stat = await host.stat(target)
+  const stat = await host.stat(file)
+  const isDir = stat?.kind === 'dir'
   const sk =
-    stat === null ? { error: `not found: ${target}` } : await extractTarget(host, tools, target, stat.kind === 'dir', meta.parserDirs)
-  return isFailure(sk) ? { isError: true as const, result: sk.error, text: sk.error } : { result: JSON.stringify(sk) }
+    stat === null
+      ? { error: `not found: ${file}` }
+      : await extractTarget(host, tools, file, isDir, meta.parserDirs, (meta.hints ?? EMPTY_HINTS).astGrep)
+  if (isFailure(sk)) return { isError: true as const, result: sk.error, text: sk.error }
+  // A file#fn target answers that function alone; a dir answers one line per file.
+  const answer = fn !== undefined && fn !== '' ? narrow(sk, file, fn) : isDir ? summarize(sk) : sk
+  return { result: JSON.stringify(answer) }
 }
 
 /** Serves show_graph: renders Claude's DOT and routes it to the pane by kind. */
@@ -154,11 +174,10 @@ async function handleShowGraph($: EngineInterface, input: Record<string, unknown
 
 async function pollDot($: EngineInterface): Promise<void> {
   const top = topOf(await read($, navAtom))
-  if (top === undefined || top.mode !== 'dot' || top.error !== null) return
-  const meta = await read($, metaAtom)
-  const tools = await read($, toolsAtom)
-  const ctx = { tools, cacheDir: meta.cacheDir, sessionTag: meta.sessionTag, parserDirs: meta.parserDirs }
-  const redrawn = await redrawDot(hostOf($), ctx, top, top.gen + 1)
+  // Keeps polling under an error too, so fixing the file brings the picture back.
+  if (top === undefined || top.mode !== 'dot') return
+  const ctx = ctxOf(await read($, metaAtom), await read($, toolsAtom))
+  const redrawn = await redrawDot(hostOf($), ctx, top, async () => (await renderCtx($)).gen).catch(() => null)
   if (redrawn !== null) await dispatch($, { type: 'replaceTop', view: redrawn })
 }
 
@@ -169,6 +188,9 @@ export const register: Register = (on, options) => {
     const home = (await $.env.get('HOME')) ?? ''
     const cacheDir = `${(await $.env.get('XDG_CACHE_HOME')) || `${home}/.cache`}/graph-in-pane`
     const parserDirs = tools['ast-grep'] === undefined ? await nvimParserDirs(host, tools, options) : []
+    const osRelease = await host.read('/etc/os-release').catch(() => '')
+    const hasBrew = (await host.run(['sh', '-c', 'command -v brew'], { stdin: '' }).catch(() => ({ exitCode: 1 }))).exitCode === 0
+    const hints: Hints = { dot: installHint(osRelease, hasBrew, 'dot'), astGrep: installHint(osRelease, hasBrew, 'ast-grep') }
     await update($, toolsAtom, () => tools)
     await update($, metaAtom, meta => ({
       cwd: e.cwd,
@@ -176,6 +198,7 @@ export const register: Register = (on, options) => {
       cacheDir,
       gen: meta?.gen ?? 0,
       parserDirs,
+      hints,
     }))
     // Pngs from sessions over a day old.
     void $.process.run(['find', cacheDir, '-name', '*.png', '-mtime', '+1', '-delete'], { stdin: '' }).catch(() => undefined)

@@ -46,3 +46,15 @@ export const ran = (exitCode: number, stdout = '', stderr = ''): ProcessRunResul
   stdout,
   stderr,
 })
+
+/** The message of anything thrown. */
+export const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err))
+
+/** Runs `work`; a rejection becomes `onError(message)` instead of escaping a hook. */
+export const safely = async <T>(work: () => Promise<T>, onError: (message: string) => T): Promise<T> => {
+  try {
+    return await work()
+  } catch (err) {
+    return onError(messageOf(err))
+  }
+}
