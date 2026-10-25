@@ -52,6 +52,8 @@ async function dispatch($: EngineInterface, action: NavAction): Promise<void> {
 async function showView($: EngineInterface, view: View, how: 'reset' | 'push' | 'replaceTop'): Promise<{ isPlaced: boolean }> {
   await dispatch($, { type: how, view })
   const opened = await $.ui.open({ id: PANE_ID, title: `Graph · ${view.title}` })
+  // A graph on screen makes an earlier "plan graph updated · /graph" stale.
+  if (opened.isPlaced) $.ui.status(undefined)
   return { isPlaced: opened.isPlaced }
 }
 

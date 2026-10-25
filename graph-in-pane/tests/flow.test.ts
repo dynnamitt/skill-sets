@@ -97,3 +97,12 @@ test('/10kfo sends the skeleton to Claude and waits; the answer replaces the wai
   expect(nav(w).stack[0]?.waiting).toBe(false)
   expect(nav(w).stack[0]?.title).toBe('pairing')
 })
+
+test('a graph shown in the pane clears a stale plan-graph status', async ($, on) => {
+  const w = world(on, FILES)
+  await start($)
+  await runCommand($, 'graph-tree', 'pair.sh')
+  await show($, { kind: 'plan', title: 'plan', dot: 'digraph p { idea -> build }' })
+  await runCommand($, 'graph', '')
+  expect(w.status[w.status.length - 1]).toBeUndefined()
+})
