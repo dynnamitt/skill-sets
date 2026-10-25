@@ -202,12 +202,12 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'graph' }, async ($, e) => {
     if (e.args.trim() === 'off') {
       await planEvent($, { type: 'off' })
-      return { text: 'graph-in-pane: plan graphs off' }
+      return { text: 'plan graphs off' }
     }
     const latest = (await read($, planAtom)).latest
     if (latest !== null) await showView($, latest, 'reset')
     else await $.ui.open({ id: PANE_ID, title: 'Graph' })
-    return { text: 'graph-in-pane: pane opened' }
+    return { text: 'pane opened' }
   })
 
   on('skill.prompt', async ($, e, next) => {

@@ -50,6 +50,8 @@ export const redrawDot = async (host: Host, ctx: RenderCtx, view: View, gen: num
   return renderView(host, ctx, { ...view, mtimeMs: stat.mtimeMs }, await host.read(view.target), gen)
 }
 
-/** The one line a command answers with. */
+const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 'es'}`
+
+/** The one line a command answers with; the engine already names the plugin. */
 export const summary = (view: View): string =>
-  view.error !== null ? `graph-in-pane: ${view.error}` : `graph-in-pane: drew ${view.title} (${view.openable.length} boxes to open)`
+  view.error ?? `drew ${view.title} (${plural(view.openable.length, 'box')} to open)`

@@ -82,3 +82,10 @@ test('a watched .dot redraws when its file changes, not before', async ($, on) =
   expect(nav(w).stack[0]?.gen).toBe(gen + 1)
   expect(w.dotInputs[w.dotInputs.length - 1]).toBe('digraph x { a -> c }')
 })
+
+test('the command line reads cleanly: no doubled plugin name, singular box', async ($, on) => {
+  world(on, FILES)
+  await start($)
+  const result = await run($, 'graph-tree', 'pair.sh')
+  expect(result.text).toBe('drew pair.sh (1 box to open)')
+})
