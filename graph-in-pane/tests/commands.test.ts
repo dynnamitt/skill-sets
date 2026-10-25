@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import { resolveTarget } from '../hooks/lib/commands'
 import type { Nav } from '../types'
 import { SOURCE as PAIR_SOURCE } from './fixtures/pair.sexp'
-import { PANE, stateOf, world } from './world'
+import { type Engine, PANE, runCommand, stateOf, world } from './world'
 
 const FILES = {
   '/fx': { kind: 'dir' as const },
@@ -13,10 +13,10 @@ const FILES = {
   '/fx/x.dot': { kind: 'file' as const, text: 'digraph x { a -> b }', mtimeMs: 5 },
 }
 
-const start = async ($: Parameters<Parameters<typeof test>[1]>[0]) =>
+const start = async ($: Engine) =>
   $.session.start({ cwd: '/fx', surface: 'terminal', isInteractive: true })
-const run = async ($: Parameters<Parameters<typeof test>[1]>[0], command: string, args: string) =>
-  $.command.run({ command, args })
+const run = async ($: Engine, command: string, args: string) =>
+  runCommand($, command, args)
 const nav = (w: ReturnType<typeof world>): Nav => stateOf<Nav>(w, 'nav') ?? { stack: [] }
 
 test('targets: quotes, ~ and relative paths resolve', async () => {

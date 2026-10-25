@@ -2,10 +2,8 @@ import { expect, test } from 'claude-code/testing'
 
 import { isPlanningSkill, PLAN_SECTION_ID, planTransition } from '../hooks/lib/plan'
 import type { PlanState } from '../types'
-import { world } from './world'
+import { type Engine, type On, runCommand, world } from './world'
 
-type $T = Parameters<Parameters<typeof test>[1]>[0]
-type OnT = Parameters<Parameters<typeof test>[1]>[1]
 
 const OFF: PlanState = { active: false, source: null, latest: null }
 const SKILL: PlanState = { active: true, source: 'skill', latest: null }
@@ -33,16 +31,16 @@ test('the latest plan graph survives every transition', async () => {
   expect(planTransition({ ...SKILL, latest }, { type: 'off' }).latest).toBe(latest)
 })
 
-const compose = async ($: $T) =>
+const compose = async ($: Engine) =>
   $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: { name: 'default', isKeepingCodingInstructions: true }, traits: [] } as never)
 
-const base = (on: OnT) => {
+const base = (on: On) => {
   on('prompt.compose', () => ({ sections: [{ id: 'intro', text: 'You are Claude.', scope: 'shared' }] }))
   on('skill.prompt', (_, e) => ({ text: e.text }))
   on('classic.UserPromptSubmit', () => ({}))
 }
 
-const start = async ($: $T) => $.session.start({ cwd: '/fx', surface: 'terminal', isInteractive: true })
+const start = async ($: Engine) => $.session.start({ cwd: '/fx', surface: 'terminal', isInteractive: true })
 
 test('outside planning the system prompt is unchanged', async ($, on) => {
   world(on, {})
@@ -66,7 +64,7 @@ test('/graph off removes the section again', async ($, on) => {
   base(on)
   await start($)
   await $.skill.prompt({ skill: 'superpowers:brainstorming', text: 'Brainstorm.', frontmatter: {}, source: 'plugin' } as never)
-  await $.command.run({ command: 'graph', args: 'off' })
+  await runCommand($, 'graph', 'off')
   const { sections } = await compose($)
   expect(sections.map(s => s.id)).toEqual(['intro'])
 })

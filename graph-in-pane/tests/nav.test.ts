@@ -1,17 +1,18 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { View } from '../types'
-import { emptyView, navReduce } from '../hooks/lib/nav'
+import { emptyView, type NavAction, navReduce } from '../hooks/lib/nav'
 
 const view = (title: string, extra: Partial<View> = {}): View => ({ ...emptyView('tree', title, `/fx/${title}`), ...extra })
 
 test('reset, push, push, pop leaves the second view shown', async () => {
-  const nav = [
+  const actions: NavAction[] = [
     { type: 'reset', view: view('a') },
     { type: 'push', view: view('b') },
     { type: 'push', view: view('c') },
     { type: 'pop' },
-  ].reduce(navReduce, { stack: [] })
+  ]
+  const nav = actions.reduce(navReduce, { stack: [] })
   expect(nav.stack.map(v => v.title)).toEqual(['a', 'b'])
 })
 

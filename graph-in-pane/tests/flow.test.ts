@@ -3,17 +3,16 @@ import { expect, test } from 'claude-code/testing'
 import { flowRequest, SHOW_GRAPH_SCHEMA } from '../hooks/lib/flow'
 import type { Nav, PlanState } from '../types'
 import { SOURCE as PAIR_SOURCE } from './fixtures/pair.sexp'
-import { stateOf, world } from './world'
+import { type Engine, runCommand, stateOf, world } from './world'
 
-type $T = Parameters<Parameters<typeof test>[1]>[0]
 
 const FILES = {
   '/fx': { kind: 'dir' as const },
   '/fx/pair.sh': { kind: 'file' as const, text: PAIR_SOURCE },
 }
 const TOOL = 'mcp__graph-in-pane__show_graph'
-const start = async ($: $T) => $.session.start({ cwd: '/fx', surface: 'terminal', isInteractive: true })
-const show = async ($: $T, input: Record<string, unknown>) => $.tool.call({ tool: TOOL, ...input } as never)
+const start = async ($: Engine) => $.session.start({ cwd: '/fx', surface: 'terminal', isInteractive: true })
+const show = async ($: Engine, input: Record<string, unknown>) => $.tool.call({ tool: TOOL, ...input } as never)
 const nav = (w: ReturnType<typeof world>): Nav => stateOf<Nav>(w, 'nav') ?? { stack: [] }
 const textOf = (result: { result?: unknown; text?: string }): string => String(result.text ?? result.result ?? '')
 
@@ -74,7 +73,7 @@ test('invalid DOT is an error for Claude and the pane keeps its graph', async ($
 test('a plan graph does not replace a tree being browsed', async ($, on) => {
   const w = world(on, FILES)
   await start($)
-  await $.command.run({ command: 'graph-tree', args: 'pair.sh' })
+  await runCommand($, 'graph-tree', 'pair.sh')
   await show($, { kind: 'plan', title: 'plan', dot: 'digraph p { idea -> build }' })
   expect(nav(w).stack.map(v => v.mode)).toEqual(['tree'])
   expect(stateOf<PlanState>(w, 'plan')?.latest?.title).toBe('plan')
@@ -84,7 +83,7 @@ test('a plan graph does not replace a tree being browsed', async ($, on) => {
 test('/10kfo sends the skeleton to Claude and waits; the answer replaces the wait', async ($, on) => {
   const w = world(on, FILES)
   await start($)
-  const ran = await $.command.run({ command: '10kfo', args: 'pair.sh' })
+  const ran = await runCommand($, '10kfo', 'pair.sh')
   expect(ran.text).toContain('graph-flow: skeleton of /fx/pair.sh sent to Claude')
   expect(nav(w).stack[0]?.waiting).toBe(true)
   await w.clock.advance(1)

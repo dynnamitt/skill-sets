@@ -66,7 +66,7 @@ test('languages come from the extension', async () => {
   ])
 })
 
-const entry = (name: string, kind: 'file' | 'dir') => ({ name, kind, size: 1, mtimeMs: 0 })
+const entry = (name: string, kind: 'file' | 'dir') => ({ name, kind, size: 1, mtimeMs: 0, isLink: false })
 
 const treeHost = (tree: Record<string, ReturnType<typeof entry>[]>, files: readonly string[] = []): Host => ({
   run: async () => ({ exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }),

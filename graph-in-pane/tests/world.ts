@@ -1,8 +1,9 @@
-import { mock, type test } from 'claude-code/testing'
+import { mock, type TestBody } from 'claude-code/testing'
 
 import { ROWS as PAIR } from './fixtures/pair.rows'
 
-type On = Parameters<Parameters<typeof test>[1]>[1]
+export type Engine = Parameters<TestBody>[0]
+export type On = Parameters<TestBody>[1]
 export type FakeFile = { kind: 'file' | 'dir'; text?: string; mtimeMs?: number }
 
 // A PNG signature and IHDR for a 600x400 picture.
@@ -40,7 +41,7 @@ export const world = (on: On, files: Record<string, FakeFile>): World => {
   on('fs.list', (_, e) => ({
     value: Object.entries(w.files)
       .filter(([path]) => path.startsWith(`${e.path}/`) && !path.slice(e.path.length + 1).includes('/'))
-      .map(([path, file]) => ({ name: path.slice(e.path.length + 1), kind: file.kind, size: 1, mtimeMs: file.mtimeMs ?? 0 })),
+      .map(([path, file]) => ({ name: path.slice(e.path.length + 1), kind: file.kind, size: 1, mtimeMs: file.mtimeMs ?? 0, isLink: false })),
   }))
   on('fs.read', (_, e) =>
     e.as === 'bytes' ? { value: { base64: PNG_600x400 } } : { value: w.files[e.path]?.text ?? '' },
@@ -91,3 +92,6 @@ export const PANE = {
   requestId: 'graph',
   props: { title: 'graph', isFocused: true, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} },
 } as const
+
+/** Runs a slash command as the person would; the engine stamps origin and presentation. */
+export const runCommand = async ($: Engine, command: string, args: string) => $.command.run({ command, args } as never)

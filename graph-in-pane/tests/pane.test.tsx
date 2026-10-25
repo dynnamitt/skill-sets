@@ -2,6 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import type { Nav, View } from '../types'
 import { emptyView } from '../hooks/lib/nav'
+import type { On } from './world'
 
 const PANE = {
   plugin: 'graph-in-pane',
@@ -36,7 +37,7 @@ const TWO: Nav = {
 }
 
 /** A versioned in-memory nav state beneath the plugin, recording each write. */
-const seed = (on: Parameters<Parameters<typeof test>[1]>[1], nav: Nav, writes: unknown[] = []) => {
+const seed = (on: On, nav: Nav, writes: unknown[] = []) => {
   const store = { value: { shape: 'nav-1', value: nav } as unknown, version: 1 }
   on('state.get', (_, e, next) => (e.key === 'nav' ? { value: { value: store.value, version: store.version } } : next(e)))
   on('state.set', (_, e, next) => {
