@@ -2,10 +2,25 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Meta, Nav, PlanState, View } from '../types'
-import { redrawDot, type RenderCtx, resolveTarget, summary, treeView } from './lib/commands'
+import { redrawDot, type RenderCtx, renderView, resolveTarget, summary, treeView } from './lib/commands'
+import { styleDot } from './lib/dot'
+import { extractTarget, isFailure } from './lib/extract'
 import { nvimParserDirs } from './lib/fallback'
+import {
+  flowRequest,
+  flowSummary,
+  parseShowGraph,
+  RESULT,
+  SHOW_GRAPH,
+  SHOW_GRAPH_DESCRIPTION,
+  SHOW_GRAPH_SCHEMA,
+  SKELETON,
+  SKELETON_DESCRIPTION,
+  SKELETON_SCHEMA,
+  waitingView,
+} from './lib/flow'
 import { hostOf } from './lib/host'
-import { type NavAction, navReduce, topOf } from './lib/nav'
+import { emptyView, type NavAction, navReduce, topOf } from './lib/nav'
 import { paneTree } from './lib/pane'
 import { resolveTools, type Tools } from './lib/tools'
 
@@ -52,12 +67,82 @@ async function treeCommand($: EngineInterface, args: string): Promise<{ text: st
   return { text: summary(view) }
 }
 
+/** Extracts a target's skeleton, shows a waiting view and asks Claude for its flow graph. */
+async function flowAsk($: EngineInterface, target: string, how: 'reset' | 'push'): Promise<{ text: string }> {
+  const { ctx } = await renderCtx($)
+  const host = hostOf($)
+  const [file = target] = target.split('#')
+  const stat = await host.stat(file)
+  const sk =
+    stat === null
+      ? { error: `not found: ${file}` }
+      : await extractTarget(host, ctx.tools, file, stat.kind === 'dir', ctx.parserDirs)
+  if (isFailure(sk)) {
+    const view = { ...emptyView('flow', file, target), error: sk.error }
+    await showView($, view, (await read($, navAtom)).stack.length > 0 ? 'push' : how)
+    return { text: summary(view) }
+  }
+  await showView($, waitingView(target), how)
+  // A command hook holds the turn; the submit runs once it has returned.
+  $.clock.after(0, () => void $.prompt.submit({ text: flowRequest(target) }))
+  return { text: flowSummary(sk, target) }
+}
+
+async function flowCommand($: EngineInterface, args: string): Promise<{ text: string }> {
+  const meta = await read($, metaAtom)
+  const home = (await $.env.get('HOME')) ?? ''
+  return flowAsk($, resolveTarget(args, meta.cwd, home), 'reset')
+}
+
 async function openBox($: EngineInterface, n: number): Promise<void> {
   const top = topOf(await read($, navAtom))
   const box = top?.openable.find(o => o.n === n)
   if (top === undefined || box === undefined) return
+  if (top.mode === 'flow') {
+    await flowAsk($, box.target, 'push')
+    return
+  }
   const { ctx, gen } = await renderCtx($)
   await showView($, await treeView(hostOf($), ctx, box.target, gen), 'push')
+}
+
+/** Serves graph_skeleton: the tree-sitter skeleton of a file or dir, as JSON. */
+async function handleSkeleton($: EngineInterface, input: Record<string, unknown>) {
+  const meta = await read($, metaAtom)
+  const tools = await read($, toolsAtom)
+  const home = (await $.env.get('HOME')) ?? ''
+  const target = resolveTarget(typeof input.target === 'string' ? input.target : '', meta.cwd, home)
+  const host = hostOf($)
+  const stat = await host.stat(target)
+  const sk =
+    stat === null ? { error: `not found: ${target}` } : await extractTarget(host, tools, target, stat.kind === 'dir', meta.parserDirs)
+  return isFailure(sk) ? { isError: true as const, result: sk.error, text: sk.error } : { result: JSON.stringify(sk) }
+}
+
+/** Serves show_graph: renders Claude's DOT and routes it to the pane by kind. */
+async function handleShowGraph($: EngineInterface, input: Record<string, unknown>) {
+  const parsed = parseShowGraph(input)
+  if (typeof parsed === 'string') return { isError: true as const, result: parsed, text: parsed }
+  const { ctx, gen } = await renderCtx($)
+  const base = { ...emptyView(parsed.kind, parsed.title, parsed.target), openable: parsed.openable }
+  const view = await renderView(hostOf($), ctx, base, styleDot(parsed.dot), gen)
+  if (view.error !== null) {
+    const text = `dot failed: ${view.error}`
+    return { isError: true as const, result: text, text }
+  }
+  const nav = await read($, navAtom)
+  const top = topOf(nav)
+  if (parsed.kind === 'plan') {
+    await update($, planAtom, plan => ({ ...(plan ?? EMPTY_PLAN), latest: view }))
+    if (nav.stack.length > 0 && nav.stack[0]?.mode !== 'plan') {
+      $.ui.status(RESULT.status)
+      return { result: RESULT.shown }
+    }
+  }
+  const how = parsed.kind === 'flow' && top?.waiting === true && top.target === parsed.target ? 'replaceTop' : 'reset'
+  const { isPlaced } = await showView($, view, how)
+  if (!isPlaced) $.ui.status(RESULT.status)
+  return { result: isPlaced ? RESULT.shown : RESULT.hidden }
 }
 
 async function pollDot($: EngineInterface): Promise<void> {
@@ -89,6 +174,10 @@ export const register: Register = (on, options) => {
     void $.process.run(['find', cacheDir, '-name', '*.png', '-mtime', '+1', '-delete'], { stdin: '' }).catch(() => undefined)
     await $.command.register({ name: 'graph-tree', description: 'Graph a file or dir literally in the graph pane', argumentHint: '<file|dir>' })
     await $.command.register({ name: '10kfv', description: '10,000 ft view: alias of /graph-tree', argumentHint: '<file|dir>' })
+    await $.command.register({ name: 'graph-flow', description: '10,000 ft flow of a file or dir, drawn by Claude in the graph pane', argumentHint: '<file|dir>' })
+    await $.command.register({ name: '10kfo', description: '10,000 ft overview: alias of /graph-flow', argumentHint: '<file|dir>' })
+    await $.tool.register({ name: SKELETON, description: SKELETON_DESCRIPTION, inputSchema: SKELETON_SCHEMA, isDeferred: false })
+    await $.tool.register({ name: SHOW_GRAPH, description: SHOW_GRAPH_DESCRIPTION, inputSchema: SHOW_GRAPH_SCHEMA, isDeferred: false })
     await $.command.register({ name: 'graph', description: 'Reopen the graph pane (latest plan graph first); /graph off stops plan graphs', argumentHint: '[off]' })
     $.clock.every(DOT_POLL_MS, () => void pollDot($))
 
@@ -97,6 +186,13 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'graph-tree' }, async ($, e) => treeCommand($, e.args))
   on('command.run', { command: '10kfv' }, async ($, e) => treeCommand($, e.args))
+
+  on('command.run', { command: 'graph-flow' }, async ($, e) => flowCommand($, e.args))
+  on('command.run', { command: '10kfo' }, async ($, e) => flowCommand($, e.args))
+
+  on('tool.call', { tool: 'mcp__graph-in-pane__graph_skeleton' }, async ($, e) => handleSkeleton($, e as Record<string, unknown>))
+
+  on('tool.call', { tool: 'mcp__graph-in-pane__show_graph' }, async ($, e) => handleShowGraph($, e as Record<string, unknown>))
 
   on('command.run', { command: 'graph' }, async ($, e) => {
     if (e.args.trim() === 'off') {

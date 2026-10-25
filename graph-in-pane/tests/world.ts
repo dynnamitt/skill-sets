@@ -74,8 +74,8 @@ export const world = (on: On, files: Record<string, FakeFile>): World => {
   on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('tool.register', (_, e) => ({ value: { tool: `mcp__graph-in-pane__${e.name}` } }))
   on('prompt.submit', (_, e) => {
-    w.submitted.push(e.text)
-    return {}
+    w.submitted.push([e.text, ...(e.context ?? [])].join('\n'))
+    return { text: e.text }
   })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   return w
