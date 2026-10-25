@@ -12,6 +12,8 @@ export type Host = {
   read: (path: string) => Promise<string>
   /** A file's bytes, base64. */
   bytes: (path: string) => Promise<string>
+  /** null when the path does not exist. */
+  stat: (path: string) => Promise<{ kind: 'file' | 'dir' | 'other'; mtimeMs: number } | null>
 }
 
 // A function declaration: the engine follows `$` past an import only into one.
@@ -22,6 +24,10 @@ export function hostOf($: EngineInterface): Host {
     list: dir => $.fs.list(dir),
     read: path => $.fs.read(path),
     bytes: async path => (await $.fs.read(path, { as: 'bytes' })).base64,
+    stat: async path => {
+      const stat = await $.fs.stat(path).catch(() => null)
+      return stat === null ? null : { kind: stat.kind, mtimeMs: stat.mtimeMs }
+    },
     env: name =>
       name === 'HOME'
         ? $.env.get('HOME')

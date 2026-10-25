@@ -20,6 +20,8 @@ export type View = {
   page: number
   error: string | null
   waiting: boolean
+  /** For a .dot file: its mtime when drawn, so a change redraws it. */
+  mtimeMs: number
 }
 
 /** The breadcrumb: `stack[0]` is the root, the last entry is shown. */

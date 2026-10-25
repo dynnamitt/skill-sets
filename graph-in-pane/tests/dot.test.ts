@@ -93,6 +93,7 @@ const renderHost = (dotResult: { exitCode: number; stderr: string }, log: string
   list: async () => [],
   read: async () => '',
   bytes: async () => PNG_HEADER_600x400,
+  stat: async () => null,
 })
 
 test('a dot failure reports its first stderr line', async () => {

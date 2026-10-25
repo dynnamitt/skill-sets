@@ -22,6 +22,7 @@ export const emptyView = (mode: Mode, title: string, target: string): View => ({
   page: 0,
   error: null,
   waiting: false,
+  mtimeMs: 0,
 })
 
 export const topOf = (nav: Nav): View | undefined => nav.stack[nav.stack.length - 1]
