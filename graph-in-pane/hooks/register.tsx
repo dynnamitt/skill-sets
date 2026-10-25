@@ -22,6 +22,7 @@ import {
 import { hostOf } from './lib/host'
 import { emptyView, type NavAction, navReduce, topOf } from './lib/nav'
 import { paneTree } from './lib/pane'
+import { isPlanningSkill, PLAN_SECTION_ID, PLAN_TEXT, type PlanEvent, planTransition } from './lib/plan'
 import { resolveTools, type Tools } from './lib/tools'
 
 export const PANE_ID = 'graph'
@@ -38,6 +39,10 @@ const toolsAtom = atom({ plugin: 'graph-in-pane', key: 'tools' } as const, EMPTY
 const navAtom = atom({ plugin: 'graph-in-pane', key: 'nav' } as const, EMPTY_NAV, { shape: 'nav-1' })
 const planAtom = atom({ plugin: 'graph-in-pane', key: 'plan' } as const, EMPTY_PLAN, { shape: 'plan-1' })
 const metaAtom = atom({ plugin: 'graph-in-pane', key: 'meta' } as const, EMPTY_META, { shape: 'meta-1' })
+
+async function planEvent($: EngineInterface, event: PlanEvent): Promise<void> {
+  await update($, planAtom, plan => planTransition(plan ?? EMPTY_PLAN, event))
+}
 
 async function dispatch($: EngineInterface, action: NavAction): Promise<void> {
   await update($, navAtom, nav => navReduce(nav ?? EMPTY_NAV, action))
@@ -196,13 +201,48 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'graph' }, async ($, e) => {
     if (e.args.trim() === 'off') {
-      await update($, planAtom, plan => ({ ...(plan ?? EMPTY_PLAN), active: false, source: null }))
+      await planEvent($, { type: 'off' })
       return { text: 'graph-in-pane: plan graphs off' }
     }
     const latest = (await read($, planAtom)).latest
     if (latest !== null) await showView($, latest, 'reset')
     else await $.ui.open({ id: PANE_ID, title: 'Graph' })
     return { text: 'graph-in-pane: pane opened' }
+  })
+
+  on('skill.prompt', async ($, e, next) => {
+    if (isPlanningSkill(e.skill)) await planEvent($, { type: 'skill' })
+    return next(e)
+  })
+
+  on('tool.call', { tool: 'EnterPlanMode' }, async ($, e, next) => {
+    const ran = await next(e)
+    await planEvent($, { type: 'enterPlanTool' })
+    return ran
+  })
+
+  on('tool.call', { tool: 'ExitPlanMode' }, async ($, e, next) => {
+    const ran = await next(e)
+    await planEvent($, { type: 'exitPlanTool' })
+    return ran
+  })
+
+  on('classic.UserPromptSubmit', async ($, e, next) => {
+    await planEvent($, { type: 'permissionMode', mode: e.permission_mode })
+    return next(e)
+  })
+
+  on('session.end', async ($, e, next) => {
+    if (e.reason === 'clear') await planEvent($, { type: 'clear' })
+    return next(e)
+  })
+
+  on('prompt.compose', async ($, e, next) => {
+    const composed = await next(e)
+    const plan = await read($, planAtom)
+    return plan.active
+      ? { ...composed, sections: [...composed.sections, { id: PLAN_SECTION_ID, text: PLAN_TEXT, scope: 'session' as const }] }
+      : composed
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE_ID }, async ($, e) => {
