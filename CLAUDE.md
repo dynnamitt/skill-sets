@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Repo Is
 
-A library of Claude Code skills — self-contained reference guides that get loaded into context when activated. No build system, no tests, no source code. Pure markdown.
+A library of Claude Code skills — self-contained reference guides that get loaded into context when activated — plus Claude Code plugins (mods). Skills are pure markdown with no build system; a plugin folder holds TypeScript hooks and its own tests.
 
 ## Structure
 
@@ -24,6 +24,24 @@ Each skill lives in its own directory:
 - `netex-opinions/` — NeTEx XSD schema analysis, code generation, rail data modeling
 - `wave-function-collapse/` — WFC procgen: tiled/overlapping models, observe/propagate/backtrack
 - `xbox-bluetooth-linux/` — Xbox controller Bluetooth (BLE) on Linux: triage, btmon, adapters, pairing workaround (+ `scripts/`)
+
+**Plugins (mods):** listed in `.claude-plugin/marketplace.json` at the repo root.
+- `graph-in-pane/` — Graphviz graphs of scripts, builds, `.dot` files and plans in a docked pane
+
+A plugin folder:
+
+```
+<plugin-name>/
+├── .claude-plugin/plugin.json   # Manifest (name, version, types, userConfig)
+├── hooks/hooks.json             # { "modules": ["./register.tsx"] }
+├── hooks/register.tsx           # The hooks module: the only file touching $ and $.state
+├── hooks/lib/                   # Pure functions, or functions taking a Host
+├── types/index.d.ts             # Self-contained state contract (no imports)
+├── tests/*.test.ts(x)           # `claude plugin test <plugin-name>`
+└── docs/                        # Design and plan
+```
+
+Check a plugin with `claude plugin validate <plugin-name>` and `claude plugin test <plugin-name>`. `.claude-plugin/types/` is engine-written and git-ignored.
 
 ## Conventions
 
