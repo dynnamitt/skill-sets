@@ -1,0 +1,98 @@
+/* dark.gvpr — re-colour any graph for a dark terminal, keeping its meaning.
+ * What it maps to what: references/terminal-display.md ("Dark terminals").
+ *
+ *   gvpr -c [-a '<bg> [<fg>]'] -f dark.gvpr in.gv | dot -Tpng ...     colours as #rrggbb
+ */
+BEGIN {
+  string BG = "#1e1e1e", FG = "#d0d0d0";          /* when the caller passes none */
+  double NEUTRAL_S = 0.05;                        /* saturation below this counts as grey */
+  /* fills: greys → surfaces just above bg; colours → dark tints of their hue */
+  double FILL_GREY_LIFT = 0.06, FILL_GREY_SPAN = 0.45;
+  double FILL_V = 0.30, FILL_S_GAIN = 2.5, FILL_S_BASE = 0.2, FILL_S_MAX = 0.65;
+  /* lines: greys → fg-tinted ink; colours keep their hue, brightened */
+  double LINE_GREY_S = 0.6, LINE_GREY_BASE = 0.35, LINE_GREY_SPAN = 0.40;
+  double LINE_S_MAX = 0.85, LINE_V_MIN = 0.72;
+  /* text: as lines, a little brighter */
+  double FONT_GREY_BASE = 0.45, FONT_GREY_SPAN = 0.45, FONT_S_MAX = 0.75, FONT_V_MIN = 0.80;
+  double bh, bs, bv, fh, fs, fv;
+  string memo[string];
+
+  if (ARGC > 0) BG = ARGV[0];
+  if (ARGC > 1) FG = ARGV[1];
+  sscanf(colorx(BG, "HSV"), "%f %f %f", &bh, &bs, &bv);
+  sscanf(colorx(FG, "HSV"), "%f %f %f", &fh, &fs, &fv);
+
+  string hsv(double h, double s, double v) { return sprintf("%.3f %.3f %.3f", h, s, v); }
+  double lo(double a, double b) { if (a < b) return a; return b; }
+  double hi(double a, double b) { if (a > b) return a; return b; }
+
+  /* kind: "fill" (areas), "line" (borders, edges), "font" (text) */
+  string remap0(string c, string kind) {
+    double h, s, v;
+    string x;
+    if (c == "transparent" || c == "none" || index(c, ":") >= 0 || index(c, ";") >= 0) return c;
+    x = colorx(c, "HSV");
+    if (x == "") return c;
+    sscanf(x, "%f %f %f", &h, &s, &v);
+    if (kind == "fill") {
+      if (s < NEUTRAL_S) return hsv(bh, bs, bv + FILL_GREY_LIFT + (1.0 - v) * FILL_GREY_SPAN);
+      return hsv(h, lo(FILL_S_MAX, s * FILL_S_GAIN + FILL_S_BASE), FILL_V);
+    }
+    if (kind == "line") {
+      if (s < NEUTRAL_S) return hsv(fh, fs * LINE_GREY_S, LINE_GREY_BASE + (1.0 - v) * LINE_GREY_SPAN);
+      return hsv(h, lo(s, LINE_S_MAX), hi(v, LINE_V_MIN));
+    }
+    if (s < NEUTRAL_S) return hsv(fh, fs, FONT_GREY_BASE + (1.0 - v) * FONT_GREY_SPAN);
+    return hsv(h, lo(s, FONT_S_MAX), hi(v, FONT_V_MIN));
+  }
+
+  /* colorx() dominates the run time and most graphs repeat a handful of colours */
+  string remap(string c, string kind) {
+    string k = kind + "|" + c;
+    if (!(k in memo)) memo[k] = remap0(c, kind);
+    return memo[k];
+  }
+
+  /* Re-colour one attribute; an empty value stands for Graphviz's default (dflt), and
+   * nothing is written when both are empty. */
+  void fix(obj_t o, string attr, string kind, string dflt) {
+    string c = "";
+    if (hasAttr(o, attr)) c = aget(o, attr);
+    if (c == "") c = dflt;
+    if (c == "") return;
+    aset(o, attr, remap(c, kind));
+  }
+
+  /* gvpr function locals are not per call, so walk nested subgraphs with a stack. */
+  void clusters(graph_t top) {
+    graph_t stack[int];
+    graph_t g, sg;
+    int n = 0;
+    stack[n++] = top;
+    while (n > 0) {
+      g = stack[--n];
+      for (sg = fstsubg(g); sg != NULL; sg = nxtsubg(sg)) {
+        stack[n++] = sg;
+        if (sg.name != "cluster*") continue;
+        fix(sg, "color", "line", "black");
+        fix(sg, "fontcolor", "font", "black");
+        fix(sg, "fillcolor", "fill", "");
+        fix(sg, "bgcolor", "fill", "");
+      }
+    }
+  }
+}
+BEG_G {
+  aset($G, "bgcolor", BG);
+  fix($G, "fontcolor", "font", "black");
+  clusters($G);
+}
+N {
+  fix($, "color", "line", "black");
+  fix($, "fillcolor", "fill", "lightgrey");
+  fix($, "fontcolor", "font", "black");
+}
+E {
+  fix($, "color", "line", "black");
+  fix($, "fontcolor", "font", "black");
+}

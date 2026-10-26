@@ -1,0 +1,52 @@
+{
+  "skill_name": "graphviz",
+  "evals": [
+    {
+      "id": 1,
+      "name": "narrating-build-script",
+      "prompt": "can you make sense of scripts/release.sh for me? it's 300 lines and half of it is echo \"==> step 4/9 ...\" banners. i think lint, tests and the docker build run in parallel (there's a bunch of & and a wait) and then it pushes with some retry loop, and there's a trap cleanup at the top. i'm in kitty with the script open in a vsplit on the left",
+      "expected_output": "Reads the script and draws its flow as DOT: steps from the banners, a fork/join for the & … wait block, a retry back edge, failure edges to a fail sink, cleanup from the trap; renders it fitted to the pane in TB orientation (tall vsplit pane) with kitten icat / dotcat.",
+      "files": [
+        "evals/files/release.sh"
+      ],
+      "assertions": [
+        "Produces a DOT graph of the script's flow rather than only a prose summary",
+        "Models the & … wait block as a parallel fan-out with an explicit join",
+        "Draws the retry loop as a back edge (or labelled self-loop) and failure paths to a fail/die sink",
+        "Represents the trap cleanup handler",
+        "Chooses rankdir TB (top-to-bottom) for the tall vsplit pane, or uses dotcat's auto orientation",
+        "Renders for kitty sized to the pane (dotcat, or dpi/size derived from the window) instead of an unsized dot -Tpng"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "live-bazzite-progress",
+      "prompt": "on bazzite (kitty terminal). i have a bootstrap.sh that sets up my dev box in ~8 stages, some run in parallel. i want it to show a flowchart of the stages in the terminal that updates as each stage starts/finishes/fails, and right now when i tried redrawing with icat --clear it flickers and the output scrolls the image away. graphviz isn't installed yet either. how do i do this properly?",
+      "expected_output": "Installs Graphviz via Homebrew or distrobox (not dnf), with the linuxbrew PATH fallback; declares all stages up front; pins the layout (dot -Tdot + neato -n2); swaps images with two image ids plus delete inside a synchronized update instead of --clear; alt screen, hidden cursor, fixed --place, stage output to a log; handles parallel stages via state files / single drawer.",
+      "files": [
+        "evals/files/bootstrap.sh"
+      ],
+      "assertions": [
+        "Recommends brew (or distrobox) for installing Graphviz on Bazzite rather than plain dnf, and does not lead with rpm-ostree layering",
+        "Explains that --clear / clearing the screen causes the flicker and replaces it with drawing the new image before deleting the old one (two image ids or placement replacement)",
+        "Uses synchronized output (CSI ?2026h/l) or an equivalent atomic update",
+        "Keeps layout stable by declaring all stages up front and/or pinning positions (dot -Tdot then neato -n2)",
+        "Stops step output from scrolling the frame (log file, alt screen, fixed --place position)",
+        "Handles parallel stages so background jobs can report state (files, or a single drawing process)"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "readme-architecture-not-graphviz",
+      "prompt": "i need an architecture diagram of our services (api gateway, orders, payments, notification worker, postgres, rabbitmq) for the README.md on github so new devs get the picture. should i use graphviz for that?",
+      "expected_output": "Recommends Mermaid (renders natively on GitHub, editable in the README) over a Graphviz PNG, and provides a Mermaid flowchart of the listed services; may mention Graphviz only for terminal use or large generated graphs.",
+      "files": [],
+      "assertions": [
+        "Recommends Mermaid for the GitHub README instead of Graphviz",
+        "Gives the reason that GitHub renders Mermaid natively (diagram stays as editable text in the README)",
+        "Provides a Mermaid diagram covering the six listed components",
+        "Does not deliver a Graphviz/DOT file or PNG as the primary answer"
+      ]
+    }
+  ]
+}
