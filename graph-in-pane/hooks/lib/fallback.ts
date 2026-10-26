@@ -9,7 +9,9 @@ import type { AstRow, Lang } from './skeleton'
 type Pos = { line: number; column: number }
 type Node = { kind: string; field: string | null; start: Pos; end: Pos; children: Node[] }
 
-const OPEN = /(?:([a-z_]+):\s*)?\(([a-z_]+) \[(\d+), (\d+)\] - \[(\d+), (\d+)\]|\)/g
+// A node: optional `field:`, `(`, kind (optionally `MISSING ` and a quoted token), optional range. ERROR/MISSING may lack a range.
+const OPEN =
+  /(?:([a-z_]+):\s*)?\((?:MISSING )?([A-Za-z_]+)(?: "(?:[^"\\]|\\.)*")?(?: \[(\d+), (\d+)\] - \[(\d+), (\d+)\])?|\)/g
 
 /** Parses `tree-sitter parse` output into a node tree. */
 const parseSexp = (sexp: string): Node[] => {
@@ -17,14 +19,16 @@ const parseSexp = (sexp: string): Node[] => {
   ;[...sexp.matchAll(OPEN)].reduce<Node[]>(
     (stack, m) => {
       if (m[0] === ')') return stack.slice(0, -1)
+      const parent = stack[stack.length - 1] ?? root
+      const ranged = m[3] !== undefined
       const node: Node = {
         kind: m[2] ?? '',
         field: m[1] ?? null,
-        start: { line: Number(m[3]), column: Number(m[4]) },
-        end: { line: Number(m[5]), column: Number(m[6]) },
+        start: ranged ? { line: Number(m[3]), column: Number(m[4]) } : parent.start,
+        end: ranged ? { line: Number(m[5]), column: Number(m[6]) } : parent.end,
         children: [],
       }
-      stack[stack.length - 1]?.children.push(node)
+      parent.children.push(node)
       return [...stack, node]
     },
     [root],

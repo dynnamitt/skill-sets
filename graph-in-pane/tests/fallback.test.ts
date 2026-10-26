@@ -23,6 +23,23 @@ test('typescript: the tree-sitter CLI gives the same skeleton as ast-grep', asyn
   )
 })
 
+test('an ERROR node inside a command does not orphan its command_name', async () => {
+  const source = '@ source ./lib.sh\n'
+  const sexp =
+    '(program [0, 0] - [1, 0] (command [0, 0] - [0, 17] (ERROR [0, 0] - [0, 1]) name: (command_name [0, 2] - [0, 8] (word [0, 2] - [0, 8])) argument: (word [0, 9] - [0, 17])))'
+  expect(sexpToRows(sexp, source, 'bash').map(r => r.ruleId)).toContain('source')
+})
+
+test('a MISSING leaf does not pop its parent', async () => {
+  const source = '@ source ./lib.sh\n'
+  const sexp = (missing: string) =>
+    `(program [0, 0] - [1, 0] (command [0, 0] - [0, 17] ${missing} name: (command_name [0, 2] - [0, 8] (word [0, 2] - [0, 8])) argument: (word [0, 9] - [0, 17])))`
+  const ruleIds = (missing: string) => sexpToRows(sexp(missing), source, 'bash').map(r => r.ruleId)
+  expect(ruleIds('(MISSING ";" [0, 1] - [0, 1])')).toContain('source')
+  expect(ruleIds('(MISSING identifier [0, 1] - [0, 1])')).toContain('source')
+  expect(ruleIds('(MISSING ")" [0, 1] - [0, 1])')).toContain('source')
+})
+
 test('parser dirs: the option first, then what nvim reports, then the XDG defaults', async () => {
   expect(
     parserDirsFrom({
