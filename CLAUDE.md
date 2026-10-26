@@ -21,6 +21,7 @@ Each skill lives in its own directory:
 - `bestagons/` — Hex grids: Red Blob vocabulary + `hexx` (Rust), `honeycomb-grid` (TS), and Lua/LÖVE pointers
 - `bevy-ecs/` — Bevy 0.18+ ECS architecture, systems, relationships, UI, animation
 - `federated-search/` — React federated search UX with parallel async queries
+- `graphviz/` — DOT diagrams in the terminal: install, kitty-fitted rendering, TB/LR by pane, live progress views (+ `scripts/`)
 - `netex-opinions/` — NeTEx XSD schema analysis, code generation, rail data modeling
 - `wave-function-collapse/` — WFC procgen: tiled/overlapping models, observe/propagate/backtrack
 - `xbox-bluetooth-linux/` — Xbox controller Bluetooth (BLE) on Linux: triage, btmon, adapters, pairing workaround (+ `scripts/`)
