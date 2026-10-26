@@ -1,4 +1,5 @@
 import type { Openable } from '../../types'
+import { base } from './path'
 import { type Call, type FileSkeleton, type Skeleton, TOP } from './skeleton'
 
 export type { Openable }
@@ -37,7 +38,6 @@ const MAX_FN_OPENABLE = 9
 
 const q = (text: string): string => `"${text.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
 const circled = (n: number): string => (n <= 20 ? String.fromCodePoint(0x2460 + n - 1) : `(${n})`)
-const base = (path: string): string => path.split('/').pop() ?? path
 const attrs = (pairs: Readonly<Record<string, string>>): string =>
   Object.entries(pairs)
     .map(([key, value]) =>

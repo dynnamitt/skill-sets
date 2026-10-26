@@ -1,9 +1,8 @@
 import type { Tools } from '../../types'
 import { type Host, safely } from './host'
+import { dirOf } from './path'
 
 export type Rendered = { ok: true; w: number; h: number } | { ok: false; error: string }
-
-const dirOf = (path: string): string => path.slice(0, path.lastIndexOf('/'))
 
 /** Width and height from a PNG's IHDR chunk (big-endian, bytes 16 to 23). */
 const pngSize = (base64: string): { w: number; h: number } | null => {

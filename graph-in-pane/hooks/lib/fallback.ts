@@ -3,6 +3,7 @@ import type { PluginOptions } from 'claude-code'
 import type { Tools } from '../../types'
 import type { Failure } from './extract'
 import type { Host } from './host'
+import { dirOf } from './path'
 import type { AstRow, Lang } from './skeleton'
 
 type Pos = { line: number; column: number }
@@ -78,8 +79,6 @@ export const sexpToRows = (sexp: string, source: string, lang: Lang): AstRow[] =
     return ruleId === null ? [] : [row(ruleId, node, slice)]
   })
 }
-
-const dirOf = (path: string): string => path.slice(0, path.lastIndexOf('/'))
 
 /** Where parser .so files may be: the option, nvim's runtimepath, then XDG defaults. */
 export const parserDirsFrom = (from: { option: string; nvimFiles: string; dataHome: string }): string[] => [

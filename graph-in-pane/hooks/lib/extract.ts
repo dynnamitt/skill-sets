@@ -1,6 +1,7 @@
 import type { Tools } from '../../types'
 import { fallbackRows } from './fallback'
 import { type Host, safely } from './host'
+import { dirOf, normalize } from './path'
 import { RULES } from './rules'
 import { type AstRow, type FileSkeleton, fileSkeleton, type Lang, langOf, type Skeleton, specsOf, toRows } from './skeleton'
 
@@ -10,19 +11,6 @@ const IGNORED_DIRS: ReadonlySet<string> = new Set(['node_modules', 'dist', 'buil
 export type Failure = { error: string }
 export const isFailure = (value: unknown): value is Failure =>
   typeof value === 'object' && value !== null && 'error' in value
-
-const dirOf = (path: string): string => path.slice(0, Math.max(0, path.lastIndexOf('/'))) || '/'
-
-/** Collapses `.` and `..` segments of an absolute path. */
-export const normalize = (path: string): string =>
-  `/${path
-    .split('/')
-    .reduce<string[]>(
-      (parts, part) =>
-        part === '' || part === '.' ? parts : part === '..' ? parts.slice(0, -1) : [...parts, part],
-      [],
-    )
-    .join('/')}`
 
 const SCRIPT_TRIES = ['', '.ts', '.tsx', '.mts', '.js', '.mjs', '.jsx', '/index.ts', '/index.tsx', '/index.js']
 

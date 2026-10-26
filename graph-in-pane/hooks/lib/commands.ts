@@ -3,6 +3,7 @@ import { altOutline, pngPath, treeGraph } from './dot'
 import { extractTarget, isFailure } from './extract'
 import { type Host, safely } from './host'
 import { emptyView } from './nav'
+import { base, normalize } from './path'
 import { renderPng, type RenderOptions } from './render'
 
 /** What rendering needs from the session: tools, where pngs go, the fallback parsers. */
@@ -11,10 +12,8 @@ export type RenderCtx = { tools: Tools; cacheDir: string; sessionTag: string; pa
 /** A command argument as an absolute path: quotes stripped, `~` expanded, relative joined. */
 export const resolveTarget = (arg: string, cwd: string, home: string): string => {
   const bare = arg.trim().replace(/^(['"])(.*)\1$/, '$2')
-  return bare.startsWith('~/') ? `${home}/${bare.slice(2)}` : bare.startsWith('/') ? bare : `${cwd.replace(/\/$/, '')}/${bare}`
+  return normalize(bare.startsWith('~/') ? `${home}/${bare.slice(2)}` : bare.startsWith('/') ? bare : `${cwd}/${bare}`)
 }
-
-const base = (path: string): string => path.split('/').filter(Boolean).pop() ?? path
 
 export const titleOf = (target: string): string => {
   const [file, fn] = target.split('#')

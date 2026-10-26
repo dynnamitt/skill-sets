@@ -25,6 +25,21 @@ test('targets: quotes, ~ and relative paths resolve', async () => {
   expect(resolveTarget('/a/b.ts', '/w', '/h')).toBe('/a/b.ts')
 })
 
+test('targets normalize: trailing slash, ./, .. and empty', async () => {
+  expect(resolveTarget('src/', '/w', '/h')).toBe('/w/src')
+  expect(resolveTarget('./src', '/w', '/h')).toBe('/w/src')
+  expect(resolveTarget('a/../b.ts', '/w', '/h')).toBe('/w/b.ts')
+  expect(resolveTarget('', '/w', '/h')).toBe('/w')
+  expect(resolveTarget('x.sh#main', '/w/', '/h')).toBe('/w/x.sh#main')
+})
+
+test('a dir given with a trailing slash still draws its import edges', async ($, on) => {
+  const w = world(on, FILES)
+  await start($)
+  await run($, 'graph-tree', './')
+  expect(w.dotInputs[w.dotInputs.length - 1]).toContain('"file:/fx/pair.sh" -> "file:/fx/lib.sh"')
+})
+
 test('a missing file shows an error and keeps the previous root', async ($, on) => {
   const w = world(on, FILES)
   await start($)
