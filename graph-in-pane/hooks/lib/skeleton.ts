@@ -13,8 +13,8 @@ export type Exit = { from: string; code: number | null; line: number }
 export type Dep = { from: string; spec: string; resolved: string | null; line: number }
 /** One file's functions, calls, exits and dependencies. */
 export type FileSkeleton = { file: string; lang: Lang; fns: Fn[]; calls: Call[]; exits: Exit[]; deps: Dep[] }
-/** The skeletons of a file or dir; `omitted` counts files past the cap. */
-export type Skeleton = { root: string; files: FileSkeleton[]; omitted: number }
+/** The skeletons of a file or dir; `omitted` counts files past the cap, a floor when `truncated`. */
+export type Skeleton = { root: string; files: FileSkeleton[]; omitted: number; truncated: boolean }
 
 /** The owner name of code outside any function. */
 export const TOP = '(top)'
@@ -228,12 +228,13 @@ export type FileSummary = { file: string; lang: Lang; fns: string[]; ownDeps: st
 /**
  * A dir's skeleton cut down to one line per file, so a big dir stays small for the model.
  * @param {Skeleton} sk the full skeleton
- * @returns {{ root: string; summary: true; omitted: number; files: FileSummary[] }} one summary per file
+ * @returns {{ root: string; summary: true; omitted: number; truncated: boolean; files: FileSummary[] }} one summary per file
  */
-export const summarize = (sk: Skeleton): { root: string; summary: true; omitted: number; files: FileSummary[] } => ({
+export const summarize = (sk: Skeleton): { root: string; summary: true; omitted: number; truncated: boolean; files: FileSummary[] } => ({
   root: sk.root,
   summary: true,
   omitted: sk.omitted,
+  truncated: sk.truncated,
   files: sk.files.map(f => ({
     file: f.file,
     lang: f.lang,

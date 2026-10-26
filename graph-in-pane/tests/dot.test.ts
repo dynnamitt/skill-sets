@@ -7,7 +7,7 @@ import { ROWS as PAIR } from './fixtures/pair.rows'
 
 const pair = (resolveLib: boolean): FileSkeleton =>
   fileSkeleton('/fx/pair.sh', 'bash', toRows(PAIR), spec => (resolveLib && spec === './lib.sh' ? '/fx/lib.sh' : null))
-const single = (file: FileSkeleton) => ({ root: '/fx', files: [file], omitted: 0 })
+const single = (file: FileSkeleton) => ({ root: '/fx', files: [file], omitted: 0, truncated: false })
 const node = (dot: string, id: string): string => dot.split('\n').find(line => line.trim().startsWith(`"${id}" [`)) ?? ''
 
 test('styleDot puts the shared style before the graph body', async () => {
@@ -58,11 +58,17 @@ test('a function focus draws only that function', async () => {
 
 test('a dir graph has a node per file, dep edges and a +N more node', async () => {
   const lib: FileSkeleton = { file: '/fx/lib.sh', lang: 'bash', fns: [], calls: [], exits: [], deps: [] }
-  const { dot, openable } = treeGraph({ root: '/fx', files: [pair(true), lib], omitted: 4 })
+  const { dot, openable } = treeGraph({ root: '/fx', files: [pair(true), lib], omitted: 4, truncated: false })
   expect(node(dot, 'file:/fx/pair.sh')).toContain('pair.sh')
   expect(dot).toContain('"file:/fx/pair.sh" -> "file:/fx/lib.sh"')
   expect(dot).toContain('+4 more files')
   expect(openable.map(o => o.target)).toEqual(['/fx/pair.sh', '/fx/lib.sh'])
+})
+
+test('a truncated dir graph marks the omitted count as a floor', async () => {
+  const lib: FileSkeleton = { file: '/fx/lib.sh', lang: 'bash', fns: [], calls: [], exits: [], deps: [] }
+  expect(treeGraph({ root: '/fx', files: [lib, pair(false)], omitted: 4, truncated: true }).dot).toContain('+4+ more files')
+  expect(treeGraph({ root: '/fx', files: [lib, pair(false)], omitted: 0, truncated: true }).dot).toContain('+0+ more files')
 })
 
 test('the alt outline starts with the first node label', async () => {

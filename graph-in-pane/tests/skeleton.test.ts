@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { EXTRACT_CONCURRENCY, listSourceFiles, MAX_FILES, MAX_LISTED, ownResolver } from '../hooks/lib/extract'
+import { EXTRACT_CONCURRENCY, listSourceFiles, MAX_FILES, MAX_LISTED, MAX_PROBE_BYTES, MAX_VISITED_DIRS, ownResolver } from '../hooks/lib/extract'
 import { type Host, mapLimit } from '../hooks/lib/host'
 import { fileSkeleton, langOf, langOfShebang, specsOf, toRows } from '../hooks/lib/skeleton'
 import { ROWS as PAIR } from './fixtures/pair.rows'
@@ -71,7 +71,7 @@ test('languages come from a shebang', async () => {
     .toEqual(['bash', 'javascript', 'typescript', null, null])
 })
 
-const entry = (name: string, kind: 'file' | 'dir') => ({ name, kind, size: 1, mtimeMs: 0, isLink: false })
+const entry = (name: string, kind: 'file' | 'dir', size = 1) => ({ name, kind, size, mtimeMs: 0, isLink: false })
 
 const treeHost = (tree: Record<string, ReturnType<typeof entry>[]>, files: readonly string[] = [], texts: Readonly<Record<string, string>> = {}): Host => ({
   run: async () => ({ exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }),
@@ -95,6 +95,31 @@ test('a big dir skips ignored folders and caps at 200 files', async () => {
   expect(files.length).toBe(200)
   expect(omitted).toBe(51)
   expect(files.filter(f => f.path.includes('node_modules'))).toEqual([])
+})
+
+test('the walk lists at most MAX_VISITED_DIRS dirs and says it was cut short', async () => {
+  const dirs = Array.from({ length: 600 }, (_, i) => `d${String(i).padStart(3, '0')}`)
+  const tree = Object.fromEntries([
+    ['/p', dirs.map(d => entry(d, 'dir'))],
+    ...dirs.map(d => [`/p/${d}`, [entry('notes.md', 'file')]] as const),
+  ])
+  const listed: string[] = []
+  const base = treeHost(tree)
+  const result = await listSourceFiles({ ...base, list: async dir => (listed.push(dir), base.list(dir)) }, '/p')
+  expect(listed.length).toBeLessThanOrEqual(MAX_VISITED_DIRS)
+  expect(result.truncated).toBe(true)
+})
+
+test('a big extension-less file is not probed for a shebang', async () => {
+  const reads: string[] = []
+  const base = treeHost(
+    { '/p': [entry('big', 'file', MAX_PROBE_BYTES + 1), entry('small', 'file')] },
+    [],
+    { '/p/big': '#!/bin/bash\n', '/p/small': '#!/bin/bash\n' },
+  )
+  const { files } = await listSourceFiles({ ...base, read: async path => (reads.push(path), base.read(path)) }, '/p')
+  expect(files.map(f => f.path)).toEqual(['/p/small'])
+  expect(reads).toEqual(['/p/small'])
 })
 
 test('mapLimit keeps order and never runs more than the limit', async () => {

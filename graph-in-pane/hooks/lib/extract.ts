@@ -11,6 +11,10 @@ export const MAX_FILES = 200
 export const MAX_LISTED = 2000
 /** The most extractions (or probes) in flight at once. */
 export const EXTRACT_CONCURRENCY = 8
+/** The most dirs a dir walk lists before it stops. */
+export const MAX_VISITED_DIRS = 500
+/** Extension-less files over this many bytes are not probed for a shebang. */
+export const MAX_PROBE_BYTES = 64 * 1024
 const PROBE_BATCH = 64
 const IGNORED_DIRS: ReadonlySet<string> = new Set(['node_modules', 'dist', 'build', 'target', '.venv'])
 
@@ -38,11 +42,11 @@ export const ownResolver =
   (host: Host) =>
   async (fromFile: string, spec: string): Promise<string | null> => {
     if (!spec.startsWith('./') && !spec.startsWith('../')) return null
-    const base = normalize(`${dirOf(fromFile)}/${spec}`)
-    if (base.split('/').includes('node_modules')) return null
-    const jsExt = Object.keys(JS_TO_TS).find(ext => base.endsWith(ext))
-    const swapped = jsExt === undefined ? [] : [`${base.slice(0, -jsExt.length)}${JS_TO_TS[jsExt]}`]
-    const tries = langOf(fromFile) === 'bash' ? [base] : [...swapped, ...SCRIPT_TRIES.map(ext => base + ext)]
+    const target = normalize(`${dirOf(fromFile)}/${spec}`)
+    if (target.split('/').includes('node_modules')) return null
+    const jsExt = Object.keys(JS_TO_TS).find(ext => target.endsWith(ext))
+    const swapped = jsExt === undefined ? [] : [`${target.slice(0, -jsExt.length)}${JS_TO_TS[jsExt]}`]
+    const tries = langOf(fromFile) === 'bash' ? [target] : [...swapped, ...SCRIPT_TRIES.map(ext => target + ext)]
     const isFile = async (path: string) => (await host.stat(path))?.kind === 'file'
     const found = await Promise.all(tries.map(async path => ((await isFile(path)) ? path : null)))
     return found.find(path => path !== null) ?? null
@@ -70,30 +74,42 @@ export const noGrammar = (path: string): string => {
   return `no grammar for ${name.includes('.') ? name.slice(name.lastIndexOf('.')) : name}`
 }
 
+type Candidate = { path: string; size: number }
+
 /**
- * The source files under a dir, ignored dirs skipped, sorted, capped at MAX_FILES. The walk stops at MAX_LISTED.
+ * The source files under a dir, ignored dirs skipped, sorted, capped at MAX_FILES. The walk stops at MAX_LISTED files or MAX_VISITED_DIRS dirs.
  * @param {Host} host lists dirs and reads files
  * @param {string} dir absolute dir path
- * @returns {Promise<{ files: SourceFile[]; omitted: number }>} up to MAX_FILES files, and how many more there were
+ * @returns {Promise<{ files: SourceFile[]; omitted: number; truncated: boolean }>} up to MAX_FILES files, how many more were found (a floor when truncated), and whether the walk stopped early
  */
-export const listSourceFiles = async (host: Host, dir: string): Promise<{ files: SourceFile[]; omitted: number }> => {
+export const listSourceFiles = async (
+  host: Host,
+  dir: string,
+): Promise<{ files: SourceFile[]; omitted: number; truncated: boolean }> => {
   // Probes entries in batches, bounded, until `room` source files are found.
-  const probe = async (paths: readonly string[], room: number, found: SourceFile[] = []): Promise<SourceFile[]> => {
+  const probe = async (paths: readonly Candidate[], room: number, found: SourceFile[] = []): Promise<SourceFile[]> => {
     if (paths.length === 0 || found.length >= room) return found.slice(0, room)
-    const batch = await mapLimit(paths.slice(0, PROBE_BATCH), EXTRACT_CONCURRENCY, async path => ({
+    const batch = await mapLimit(paths.slice(0, PROBE_BATCH), EXTRACT_CONCURRENCY, async ({ path, size }) => ({
       path,
-      lang: await langOfFile(host, path),
+      lang: size > MAX_PROBE_BYTES && langOf(path) === null ? null : await langOfFile(host, path),
     }))
     const hits = batch.filter((file): file is SourceFile => file.lang !== null)
     return probe(paths.slice(PROBE_BATCH), room, [...found, ...hits])
   }
+  // Dirs listed so far, and whether the dir budget cut the walk short.
+  let listedDirs = 0, dirsCut = false
   // Depth-first and in sequence: a dir's files, then its subdirs, each sorted.
   const walk = async (at: string, room: number): Promise<SourceFile[]> => {
     if (room <= 0) return []
+    if (listedDirs >= MAX_VISITED_DIRS) {
+      dirsCut = true
+      return []
+    }
+    listedDirs++
     // An unreadable folder is skipped, not fatal.
     const entries = [...(await host.list(at).catch(() => []))].sort((a, b) => a.name.localeCompare(b.name))
     const here = await probe(
-      entries.filter(entry => entry.kind === 'file').map(entry => `${at}/${entry.name}`),
+      entries.filter(entry => entry.kind === 'file').map(entry => ({ path: `${at}/${entry.name}`, size: entry.size })),
       room,
     )
     return entries
@@ -107,7 +123,11 @@ export const listSourceFiles = async (host: Host, dir: string): Promise<{ files:
       )
   }
   const all = await walk(dir, MAX_LISTED)
-  return { files: all.slice(0, MAX_FILES), omitted: Math.max(0, all.length - MAX_FILES) }
+  return {
+    files: all.slice(0, MAX_FILES),
+    omitted: Math.max(0, all.length - MAX_FILES),
+    truncated: dirsCut || all.length >= MAX_LISTED,
+  }
 }
 
 const astGrepRows = async (host: Host, astGrep: string, file: string, lang: Lang): Promise<AstRow[] | Failure> => {
@@ -175,13 +195,13 @@ export const extractTarget = async (
     const lang = await langOfFile(host, path)
     if (lang === null) return { error: noGrammar(path) }
     const file = await extractFile(host, tools, path, lang, parserDirs, missing)
-    return isFailure(file) ? file : { root: dirOf(path), files: [file], omitted: 0 }
+    return isFailure(file) ? file : { root: dirOf(path), files: [file], omitted: 0, truncated: false }
   }
-  const { files, omitted } = await listSourceFiles(host, path)
+  const { files, omitted, truncated } = await listSourceFiles(host, path)
   if (files.length === 0) return { error: `no bash, TypeScript or JavaScript files under ${path}` }
   const skeletons = await mapLimit(files, EXTRACT_CONCURRENCY, file => extractFile(host, tools, file.path, file.lang, parserDirs, missing))
   const failed = skeletons.find(isFailure)
   return failed !== undefined && skeletons.every(isFailure)
     ? failed
-    : { root: path, files: skeletons.filter((sk): sk is FileSkeleton => !isFailure(sk)), omitted }
+    : { root: path, files: skeletons.filter((sk): sk is FileSkeleton => !isFailure(sk)), omitted, truncated }
 }

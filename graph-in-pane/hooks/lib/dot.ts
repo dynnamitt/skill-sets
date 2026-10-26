@@ -130,7 +130,9 @@ const dirGraph = (sk: Skeleton): Graph => {
         .filter(dep => dep.resolved !== null && inSet.has(dep.resolved))
         .map(dep => edgeLine(`file:${file.file}`, `file:${dep.resolved}`)),
     ),
-    ...(sk.omitted > 0 ? [nodeLine('more', { label: `+${sk.omitted} more files`, shape: 'note' })] : []),
+    ...(sk.omitted > 0 || sk.truncated
+      ? [nodeLine('more', { label: `+${sk.omitted}${sk.truncated ? '+' : ''} more files`, shape: 'note' })]
+      : []),
   ]
   return { dot: wrap(lines), openable }
 }
