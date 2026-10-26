@@ -41,6 +41,8 @@ export type World = {
   gitFiles: string | null
   /** Texts proposed as the prompt box's dim suggestion. */
   suggested: string[]
+  /** Texts shown as toasts. */
+  toasts: string[]
 }
 
 /** Answers every host call the plugin makes from memory: files, ast-grep, dot, state, ui. */
@@ -48,7 +50,7 @@ export const world = (on: On, files: Record<string, FakeFile>): World => {
   const clock = mock.clock(on, { now: 1000 })
   const w: World = {
     files, dotInputs: [], dotFails: null, state: {}, writes: [], submitted: [], status: [], placed: true, clock,
-    denied: [], noDot: false, dotRejects: false, noPng: false, runs: [], beforeDot: null, gitFiles: null, suggested: [],
+    denied: [], noDot: false, dotRejects: false, noPng: false, runs: [], beforeDot: null, gitFiles: null, suggested: [], toasts: [],
   }
   mock.env(on, { HOME: '/h' })
   on('fs.exists', (_, e) => ({ value: e.path in w.files }))
@@ -106,6 +108,10 @@ export const world = (on: On, files: Record<string, FakeFile>): World => {
     return { value: { isSet: true, version: current + 1 } }
   })
   on('ui.open', () => ({ value: w.placed ? { isPlaced: true } : { isPlaced: false, reason: 'narrow terminal' } }))
+  on('ui.toast', (_, e) => {
+    w.toasts.push(e.text)
+    return { value: undefined }
+  })
   on('ui.status', (_, e) => {
     w.status.push(e.text)
     return { value: undefined }

@@ -17,7 +17,7 @@ fewer terminal splits.
 |---|---|---|
 | `/graph-tree <file\|dir>` | `/10kfv` (view) | The literal structure from tree-sitter: functions, calls, external commands, exits and own-file dependencies. Instant, uses no tokens. A `.dot` file is drawn as written and redrawn when it changes. |
 | `/graph-flow <file\|dir>` | `/10kfo` (overview) | A 10,000 ft flow that Claude draws from the tree-sitter skeleton: phases, failure exits, every arrow backed by the code. |
-| `/graph` | | Reopens the pane, showing the latest plan graph first. `/graph off` stops plan graphs. |
+| `/graph` | | Reopens the pane, showing the latest plan graph first. `/graph off` stops plan graphs. `/graph check` looks for the tools again and says what each is for and how to install a missing one. |
 
 **Picking the path**
 
@@ -47,6 +47,8 @@ Claude keeps a picture of the plan in the pane.
 Any Linux distro. Each tool is looked up on `PATH`, then in the Homebrew,
 `~/.cargo/bin`, `~/.local/bin`, `/usr/local/bin` and `/usr/bin` folders. A
 path can also be set in the plugin's options (`/config`).
+A session that starts without a required tool shows a toast naming it; until
+it is found, each command looks again, so installing it needs no restart.
 
 | Tool | Needed for | Arch | Fedora / Bazzite | Debian / Ubuntu |
 |---|---|---|---|---|

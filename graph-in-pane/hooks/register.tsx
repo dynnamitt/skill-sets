@@ -24,7 +24,7 @@ import { emptyView, type NavAction, navReduce, topOf } from './lib/nav'
 import { paneTree } from './lib/pane'
 import { isPickToken, listCandidates, nearPaths, notFoundText, PICK_CACHE_MS, pickRoot, rank } from './lib/pick'
 import { isPlanningSkill, PLAN_SECTION_ID, PLAN_TEXT, type PlanEvent, planTransition } from './lib/plan'
-import { installHint, resolveTools, type Tools } from './lib/tools'
+import { installHint, missingRequired, resolveTools, toolReport, type Tools } from './lib/tools'
 import { langOf, narrow, summarize } from './lib/skeleton'
 
 /** The id of the graph pane. */
@@ -245,9 +245,9 @@ async function pollDot($: EngineInterface): Promise<void> {
  * @param {EngineInterface} $ the engine handed to a hook
  * @param {PluginOptions} options the plugin options
  * @param {string} cwd the session's directory
- * @returns {Promise<void>} once both atoms are written
+ * @returns {Promise<{ tools: Tools; osRelease: string; hasBrew: boolean }>} what was found, for a report
  */
-async function setup($: EngineInterface, options: PluginOptions, cwd: string): Promise<void> {
+async function setup($: EngineInterface, options: PluginOptions, cwd: string): Promise<{ tools: Tools; osRelease: string; hasBrew: boolean }> {
   const host = hostOf($)
   const home = (await $.env.get('HOME')) ?? ''
   const cacheDir = `${(await $.env.get('XDG_CACHE_HOME')) || `${home}/.cache`}/graph-in-pane`
@@ -272,6 +272,7 @@ async function setup($: EngineInterface, options: PluginOptions, cwd: string): P
     parserDirs,
     hints,
   }))
+  return { tools, osRelease, hasBrew }
 }
 
 /** The typeahead rows for a path-taking command's argument: fuzzy matches under the dir the token names. */
@@ -288,9 +289,14 @@ async function pickRows($: EngineInterface, token: string): Promise<PromptAutoco
   }))
 }
 
-/** Sets the session up unless done: a /clear starts one with fresh state and no session.start. */
+/**
+ * Sets the session up unless done (a /clear starts one with fresh state and no session.start),
+ * and looks for the tools again while a required one is missing, so one installed mid-session is found on its next use.
+ */
 async function ready($: EngineInterface, options: PluginOptions): Promise<void> {
-  if ((await read($, metaAtom)).sessionTag === EMPTY_META.sessionTag) await setup($, options, await $.session.cwd())
+  const meta = await read($, metaAtom)
+  const isFresh = meta.sessionTag === EMPTY_META.sessionTag
+  if (isFresh || missingRequired(await read($, toolsAtom)).length > 0) await setup($, options, isFresh ? await $.session.cwd() : meta.cwd)
 }
 
 /**
@@ -301,7 +307,9 @@ async function ready($: EngineInterface, options: PluginOptions): Promise<void> 
  */
 export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
-    await setup($, options, e.cwd)
+    const { tools } = await setup($, options, e.cwd)
+    const missing = missingRequired(tools)
+    if (missing.length > 0) $.ui.toast(`graph-in-pane: ${missing.join(', ')} not found · /graph check explains`)
     const { cacheDir } = await read($, metaAtom)
     // Pngs from sessions over a day old.
     void $.process.run(['find', cacheDir, '-name', '*.png', '-mtime', '+1', '-delete'], { stdin: '' }).catch(() => undefined)
@@ -311,7 +319,7 @@ export const register: Register = (on, options) => {
     await $.command.register({ name: '10kfo', description: '10,000 ft overview: alias of /graph-flow', argumentHint: '<file|dir>' })
     await $.tool.register({ name: SKELETON, description: SKELETON_DESCRIPTION, inputSchema: SKELETON_SCHEMA, isDeferred: false })
     await $.tool.register({ name: SHOW_GRAPH, description: SHOW_GRAPH_DESCRIPTION, inputSchema: SHOW_GRAPH_SCHEMA, isDeferred: false })
-    await $.command.register({ name: 'graph', description: 'Reopen the graph pane (latest plan graph first); /graph off stops plan graphs', argumentHint: '[off]' })
+    await $.command.register({ name: 'graph', description: 'Reopen the graph pane (latest plan graph first); /graph off stops plan graphs; /graph check checks the tools', argumentHint: '[off|check]' })
     // One poll at a time: a slow dot run must not be raced by the next tick.
     let isPolling = false
     $.clock.every(DOT_POLL_MS, () => {
@@ -346,6 +354,11 @@ export const register: Register = (on, options) => {
     if (e.args.trim() === 'off') {
       await planEvent($, { type: 'off' })
       return { text: 'plan graphs off' }
+    }
+    if (e.args.trim() === 'check') {
+      const meta = await read($, metaAtom)
+      const found = await setup($, options, meta.sessionTag === EMPTY_META.sessionTag ? await $.session.cwd() : meta.cwd)
+      return { text: toolReport(found.tools, found.osRelease, found.hasBrew).join('\n') }
     }
     const latest = (await read($, planAtom)).latest
     if (latest !== null) await showView($, latest, 'reset')

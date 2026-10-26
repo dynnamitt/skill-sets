@@ -91,17 +91,75 @@ const familyOf = (osRelease: string): Family => {
 const PORTABLE_AST_GREP = 'cargo install ast-grep  or  npm i -g @ast-grep/cli'
 const PORTABLE_TREE_SITTER = 'cargo install tree-sitter-cli  or  npm i -g tree-sitter-cli'
 
-const HINTS: Readonly<Record<Family, (hasBrew: boolean) => Readonly<Record<'dot' | 'ast-grep' | 'tree-sitter', string>>>> = {
-  arch: () => ({ dot: 'pacman -S graphviz', 'ast-grep': 'pacman -S ast-grep', 'tree-sitter': 'pacman -S tree-sitter-cli' }),
+type Installs = Readonly<Record<ToolName, string>>
+
+const BREW: Installs = {
+  dot: 'brew install graphviz', unflatten: 'brew install graphviz', 'ast-grep': 'brew install ast-grep',
+  'tree-sitter': PORTABLE_TREE_SITTER, nvim: 'brew install neovim', fzf: 'brew install fzf',
+}
+
+const HINTS: Readonly<Record<Family, (hasBrew: boolean) => Installs>> = {
+  arch: () => ({
+    dot: 'pacman -S graphviz', unflatten: 'pacman -S graphviz', 'ast-grep': 'pacman -S ast-grep',
+    'tree-sitter': 'pacman -S tree-sitter-cli', nvim: 'pacman -S neovim', fzf: 'pacman -S fzf',
+  }),
   fedora: hasBrew =>
     hasBrew
-      ? { dot: 'brew install graphviz', 'ast-grep': 'brew install ast-grep', 'tree-sitter': PORTABLE_TREE_SITTER }
-      : { dot: 'sudo dnf install graphviz', 'ast-grep': 'cargo install ast-grep', 'tree-sitter': PORTABLE_TREE_SITTER },
-  debian: () => ({ dot: 'sudo apt install graphviz', 'ast-grep': PORTABLE_AST_GREP, 'tree-sitter': PORTABLE_TREE_SITTER }),
+      ? BREW
+      : {
+          dot: 'sudo dnf install graphviz', unflatten: 'sudo dnf install graphviz', 'ast-grep': 'cargo install ast-grep',
+          'tree-sitter': PORTABLE_TREE_SITTER, nvim: 'sudo dnf install neovim', fzf: 'sudo dnf install fzf',
+        },
+  debian: () => ({
+    dot: 'sudo apt install graphviz', unflatten: 'sudo apt install graphviz', 'ast-grep': PORTABLE_AST_GREP,
+    'tree-sitter': PORTABLE_TREE_SITTER, nvim: 'sudo apt install neovim', fzf: 'sudo apt install fzf',
+  }),
   other: hasBrew =>
     hasBrew
-      ? { dot: 'brew install graphviz', 'ast-grep': 'brew install ast-grep', 'tree-sitter': PORTABLE_TREE_SITTER }
-      : { dot: 'install graphviz with your package manager', 'ast-grep': PORTABLE_AST_GREP, 'tree-sitter': PORTABLE_TREE_SITTER },
+      ? BREW
+      : {
+          dot: 'install graphviz with your package manager', unflatten: 'install graphviz with your package manager',
+          'ast-grep': PORTABLE_AST_GREP, 'tree-sitter': PORTABLE_TREE_SITTER,
+          nvim: 'install neovim with your package manager', fzf: 'install fzf with your package manager',
+        },
+}
+
+/** What each tool is for, in the /graph check report. */
+const PURPOSE: Readonly<Record<ToolName, string>> = {
+  dot: 'draws every graph',
+  'ast-grep': 'reads code for /graph-tree, /graph-flow and graph_skeleton',
+  'tree-sitter': "reads code with nvim's parsers when ast-grep is missing",
+  nvim: 'finds the tree-sitter parsers',
+  unflatten: 'evens out wide tree graphs',
+  fzf: 'ranks the path typeahead',
+}
+
+/**
+ * The required tools that are missing: dot, and a code reader (ast-grep, else the tree-sitter CLI).
+ * @param {Tools} tools the resolved tool paths
+ * @returns {ToolName[]} the missing ones; ast-grep stands for the code reader
+ */
+export const missingRequired = (tools: Tools): ToolName[] => [
+  ...(tools.dot === undefined ? (['dot'] as const) : []),
+  ...(tools['ast-grep'] === undefined && tools['tree-sitter'] === undefined ? (['ast-grep'] as const) : []),
+]
+
+/**
+ * One line per tool: where it was found, or what it is for and how to install it.
+ * @param {Tools} tools the resolved tool paths
+ * @param {string} osRelease the text of /etc/os-release
+ * @param {boolean} hasBrew whether Homebrew is installed
+ * @returns {string[]} `✓` found, `✗` required and missing, `–` optional and missing
+ */
+export const toolReport = (tools: Tools, osRelease: string, hasBrew: boolean): string[] => {
+  const installs = HINTS[familyOf(osRelease)](hasBrew)
+  const required = missingRequired(tools)
+  return TOOL_NAMES.map(name => {
+    const path = tools[name]
+    if (path !== undefined) return `✓ ${name}  ${path}`
+    const head = required.includes(name) ? `✗ ${name}` : `– ${name} (optional)`
+    return `${head} — ${PURPOSE[name]}. Install: ${installs[name]}`
+  })
 }
 
 /**
