@@ -1,9 +1,9 @@
 import type { Tools } from '../../types'
 import { fallbackRows } from './fallback'
 import { type Host, safely } from './host'
-import { dirOf, normalize } from './path'
+import { base, dirOf, normalize } from './path'
 import { RULES } from './rules'
-import { type AstRow, type FileSkeleton, fileSkeleton, type Lang, langOf, type Skeleton, specsOf, toRows } from './skeleton'
+import { type AstRow, type FileSkeleton, fileSkeleton, type Lang, langOf, langOfShebang, type Skeleton, specsOf, toRows } from './skeleton'
 
 export const MAX_FILES = 200
 const IGNORED_DIRS: ReadonlySet<string> = new Set(['node_modules', 'dist', 'build', 'target', '.venv'])
@@ -31,9 +31,30 @@ export const ownResolver =
     return found.find(path => path !== null) ?? null
   }
 
+export type SourceFile = { path: string; lang: Lang }
+
+/**
+ * The language of a file: by extension, else by shebang when the name has no `.`.
+ * @param {Host} host reads the file for the shebang probe
+ * @param {string} path absolute file path
+ * @returns {Promise<Lang | null>} the language, else null
+ */
+export const langOfFile = async (host: Host, path: string): Promise<Lang | null> =>
+  langOf(path) ?? (base(path).includes('.') ? null : langOfShebang(await host.read(path).catch(() => '')))
+
+/**
+ * The "no grammar" message for a file: its extension when it has one, else its name.
+ * @param {string} path file path
+ * @returns {string} the error text
+ */
+export const noGrammar = (path: string): string => {
+  const name = base(path)
+  return `no grammar for ${name.includes('.') ? name.slice(name.lastIndexOf('.')) : name}`
+}
+
 /** The source files under a dir, ignored dirs skipped, sorted, capped at MAX_FILES. */
-export const listSourceFiles = async (host: Host, dir: string): Promise<{ files: string[]; omitted: number }> => {
-  const walk = async (at: string): Promise<string[]> => {
+export const listSourceFiles = async (host: Host, dir: string): Promise<{ files: SourceFile[]; omitted: number }> => {
+  const walk = async (at: string): Promise<SourceFile[]> => {
     // An unreadable folder is skipped, not fatal.
     const entries = [...(await host.list(at).catch(() => []))].sort((a, b) => a.name.localeCompare(b.name))
     const nested = await Promise.all(
@@ -41,10 +62,12 @@ export const listSourceFiles = async (host: Host, dir: string): Promise<{ files:
         .filter(entry => entry.kind === 'dir' && !entry.name.startsWith('.') && !IGNORED_DIRS.has(entry.name))
         .map(entry => walk(`${at}/${entry.name}`)),
     )
-    const here = entries
-      .filter(entry => entry.kind === 'file' && langOf(entry.name) !== null)
-      .map(entry => `${at}/${entry.name}`)
-    return [...here, ...nested.flat()]
+    const here = await Promise.all(
+      entries
+        .filter(entry => entry.kind === 'file')
+        .map(async entry => ({ path: `${at}/${entry.name}`, lang: await langOfFile(host, `${at}/${entry.name}`) })),
+    )
+    return [...here.filter((file): file is SourceFile => file.lang !== null), ...nested.flat()]
   }
   const all = await walk(dir)
   return { files: all.slice(0, MAX_FILES), omitted: Math.max(0, all.length - MAX_FILES) }
@@ -94,14 +117,14 @@ export const extractTarget = async (
   missing = 'ast-grep not found',
 ): Promise<Skeleton | Failure> => {
   if (!isDir) {
-    const lang = langOf(path)
-    if (lang === null) return { error: `no grammar for ${path.includes('.') ? path.slice(path.lastIndexOf('.')) : path}` }
+    const lang = await langOfFile(host, path)
+    if (lang === null) return { error: noGrammar(path) }
     const file = await extractFile(host, tools, path, lang, parserDirs, missing)
     return isFailure(file) ? file : { root: dirOf(path), files: [file], omitted: 0 }
   }
   const { files, omitted } = await listSourceFiles(host, path)
   if (files.length === 0) return { error: `no bash, TypeScript or JavaScript files under ${path}` }
-  const skeletons = await Promise.all(files.map(file => extractFile(host, tools, file, langOf(file) as Lang, parserDirs, missing)))
+  const skeletons = await Promise.all(files.map(file => extractFile(host, tools, file.path, file.lang, parserDirs, missing)))
   const failed = skeletons.find(isFailure)
   return failed !== undefined && skeletons.every(isFailure)
     ? failed

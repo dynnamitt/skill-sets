@@ -10,6 +10,8 @@ const FILES = {
   '/fx/pair.sh': { kind: 'file' as const, text: PAIR_SOURCE },
   '/fx/lib.sh': { kind: 'file' as const, text: 'helper() { :; }\n' },
   '/fx/notes.py': { kind: 'file' as const, text: 'print(1)\n' },
+  '/fx/deploy': { kind: 'file' as const, text: '#!/bin/sh\nexit 0\n' },
+  '/fx/LICENSE': { kind: 'file' as const, text: 'MIT\n' },
   '/fx/x.dot': { kind: 'file' as const, text: 'digraph x { a -> b }', mtimeMs: 5 },
 }
 
@@ -55,6 +57,15 @@ test('an unsupported file says there is no grammar', async ($, on) => {
   await start($)
   await run($, 'graph-tree', 'notes.py')
   expect(nav(w).stack[0]?.error).toContain('no grammar for .py')
+})
+
+test('an extension-less script is graphed; a plain file says no grammar for its name', async ($, on) => {
+  const w = world(on, FILES)
+  await start($)
+  await run($, 'graph-tree', 'deploy')
+  expect(nav(w).stack[0]?.error ?? null).toBe(null)
+  await run($, 'graph-tree', 'LICENSE')
+  expect(nav(w).stack[nav(w).stack.length - 1]?.error).toContain('no grammar for LICENSE')
 })
 
 test('a .dot file is rendered as written', async ($, on) => {

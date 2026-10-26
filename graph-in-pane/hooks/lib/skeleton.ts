@@ -25,11 +25,34 @@ const EXT_LANG: Readonly<Record<string, Lang>> = {
   jsx: 'javascript',
 }
 
-/** The language of a path by its extension; shebang detection is extract's. */
+/** The language of a path by its extension; null when it has none or an unknown one (shebangs: `langOfShebang`). */
 export const langOf = (path: string): Lang | null => {
   const name = path.split('/').pop() ?? ''
   const dot = name.lastIndexOf('.')
   return dot > 0 ? (EXT_LANG[name.slice(dot + 1)] ?? null) : null
+}
+
+const INTERPRETER_LANG: Readonly<Record<string, Lang>> = {
+  bash: 'bash',
+  sh: 'bash',
+  dash: 'bash',
+  node: 'javascript',
+  tsx: 'typescript',
+  'ts-node': 'typescript',
+}
+
+/**
+ * The language named by a `#!` first line; `env` and `env -S` are skipped.
+ * @param {string} text the file's contents (only the first line is read)
+ * @returns {Lang | null} the language, else null for no shebang or an unknown interpreter
+ */
+export const langOfShebang = (text: string): Lang | null => {
+  const line = text.split('\n', 1)[0] ?? ''
+  if (!line.startsWith('#!')) return null
+  const words = line.slice(2).trim().split(/\s+/)
+  const program = (words[0] ?? '').split('/').pop()
+  const target = program === 'env' ? words.slice(1).find(word => !word.startsWith('-') && !word.includes('=')) : program
+  return INTERPRETER_LANG[(target ?? '').split('/').pop() ?? ''] ?? null
 }
 
 type JsonRow = { ruleId: string; text: string; range: { start: Pos; end: Pos } }

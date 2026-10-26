@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { listSourceFiles, ownResolver } from '../hooks/lib/extract'
 import type { Host } from '../hooks/lib/host'
-import { fileSkeleton, langOf, specsOf, toRows } from '../hooks/lib/skeleton'
+import { fileSkeleton, langOf, langOfShebang, specsOf, toRows } from '../hooks/lib/skeleton'
 import { ROWS as PAIR } from './fixtures/pair.rows'
 import { ROWS as VITE } from './fixtures/vite.rows'
 
@@ -66,6 +66,11 @@ test('languages come from the extension', async () => {
   ])
 })
 
+test('languages come from a shebang', async () => {
+  expect(['#!/bin/bash\n', '#!/usr/bin/env -S node --x\n', '#!/usr/bin/env tsx\n', '#!/usr/bin/python3\n', 'echo\n'].map(text => langOfShebang(text)))
+    .toEqual(['bash', 'javascript', 'typescript', null, null])
+})
+
 const entry = (name: string, kind: 'file' | 'dir') => ({ name, kind, size: 1, mtimeMs: 0, isLink: false })
 
 const treeHost = (tree: Record<string, ReturnType<typeof entry>[]>, files: readonly string[] = []): Host => ({
@@ -89,7 +94,7 @@ test('a big dir skips ignored folders and caps at 200 files', async () => {
   const { files, omitted } = await listSourceFiles(host, '/p')
   expect(files.length).toBe(200)
   expect(omitted).toBe(51)
-  expect(files.filter(f => f.includes('node_modules'))).toEqual([])
+  expect(files.filter(f => f.path.includes('node_modules'))).toEqual([])
 })
 
 test('relative specs resolve to existing own files with extensions', async () => {
