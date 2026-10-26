@@ -37,8 +37,8 @@ Claude keeps a picture of the plan in the pane.
 ## Requirements
 
 Any Linux distro. Each tool is looked up on `PATH`, then in the Homebrew,
-`~/.cargo/bin` and `~/.local/bin` folders. A path can also be set in the
-plugin's options (`/config`).
+`~/.cargo/bin`, `~/.local/bin`, `/usr/local/bin` and `/usr/bin` folders. A
+path can also be set in the plugin's options (`/config`).
 
 | Tool | Needed for | Arch | Fedora / Bazzite | Debian / Ubuntu |
 |---|---|---|---|---|

@@ -7,6 +7,11 @@ test('arch gets pacman for ast-grep', async () => {
   expect(installHint('ID=arch\n', false, 'ast-grep')).toContain('pacman -S ast-grep')
 })
 
+test('the ast-grep hint offers the tree-sitter CLI for the nvim fallback', async () => {
+  expect(installHint('ID=manjaro\nID_LIKE=arch\n', false, 'ast-grep')).toContain('pacman -S tree-sitter-cli')
+  expect(installHint('ID=ubuntu\nID_LIKE=debian\n', false, 'ast-grep')).toContain('npm i -g tree-sitter-cli')
+})
+
 test('bazzite with brew gets brew for graphviz', async () => {
   expect(installHint('ID=bazzite\nID_LIKE="fedora"\n', true, 'dot')).toContain(
     'brew install graphviz',
@@ -25,12 +30,14 @@ test('ubuntu gets apt for graphviz', async () => {
   )
 })
 
-test('candidate dirs cover brew, cargo and local bins', async () => {
+test('candidate dirs cover brew, cargo, local and distro bins', async () => {
   expect(candidateDirs('/home/u')).toEqual([
     '/home/linuxbrew/.linuxbrew/bin',
     '/home/u/.linuxbrew/bin',
     '/home/u/.cargo/bin',
     '/home/u/.local/bin',
+    '/usr/local/bin',
+    '/usr/bin',
   ])
 })
 
@@ -62,4 +69,9 @@ test('an option path wins without running a process', async () => {
 test('a tool only in a candidate dir is found there', async () => {
   const tools = await resolveTools(fakeHost({}, ['/home/u/.cargo/bin/ast-grep']), {})
   expect(tools).toEqual({ 'ast-grep': '/home/u/.cargo/bin/ast-grep' })
+})
+
+test('a distro-packaged tool is found in /usr/bin when command -v misses it', async () => {
+  const tools = await resolveTools(fakeHost({}, ['/usr/bin/ast-grep']), {})
+  expect(tools).toEqual({ 'ast-grep': '/usr/bin/ast-grep' })
 })

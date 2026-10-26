@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, PluginOptions, Register } from 'claude-code'
 
 import type { Hints, Meta, Nav, PlanState, View } from '../types'
 import { flowCheck, redrawDot, type RenderCtx, renderView, resolveTarget, skeletonOf, summary, treeView } from './lib/commands'
@@ -196,6 +196,45 @@ async function pollDot($: EngineInterface): Promise<void> {
 }
 
 /**
+ * Finds the tools and writes this session's tools and meta: session.start's job, and the first use's after a /clear.
+ * @param {EngineInterface} $ the engine handed to a hook
+ * @param {PluginOptions} options the plugin options
+ * @param {string} cwd the session's directory
+ * @returns {Promise<void>} once both atoms are written
+ */
+async function setup($: EngineInterface, options: PluginOptions, cwd: string): Promise<void> {
+  const host = hostOf($)
+  const home = (await $.env.get('HOME')) ?? ''
+  const cacheDir = `${(await $.env.get('XDG_CACHE_HOME')) || `${home}/.cache`}/graph-in-pane`
+  const [{ tools, parserDirs }, osRelease, hasBrew] = await Promise.all([
+    resolveTools(host, options).then(async tools => ({
+      tools,
+      parserDirs: tools['ast-grep'] === undefined ? await nvimParserDirs(host, tools, options) : [],
+    })),
+    host.read('/etc/os-release').catch(() => ''),
+    host
+      .run(['sh', '-c', 'command -v brew'], { stdin: '' })
+      .catch(() => ({ exitCode: 1 }))
+      .then(result => result.exitCode === 0),
+  ])
+  const hints: Hints = { dot: installHint(osRelease, hasBrew, 'dot'), astGrep: installHint(osRelease, hasBrew, 'ast-grep') }
+  await update($, toolsAtom, () => tools)
+  await update($, metaAtom, meta => ({
+    cwd,
+    sessionTag: String(Date.now()),
+    cacheDir,
+    gen: meta?.gen ?? 0,
+    parserDirs,
+    hints,
+  }))
+}
+
+/** Sets the session up unless done: a /clear starts one with fresh state and no session.start. */
+async function ready($: EngineInterface, options: PluginOptions): Promise<void> {
+  if ((await read($, metaAtom)).sessionTag === EMPTY_META.sessionTag) await setup($, options, await $.session.cwd())
+}
+
+/**
  * The mod's hooks module: session start, the /graph commands, the show_graph and graph_skeleton tools, and plan tracking.
  * @param {Parameters<Register>[0]} on registers a hook for an event
  * @param {Parameters<Register>[1]} options the plugin options
@@ -203,30 +242,8 @@ async function pollDot($: EngineInterface): Promise<void> {
  */
 export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
-    const host = hostOf($)
-    const home = (await $.env.get('HOME')) ?? ''
-    const cacheDir = `${(await $.env.get('XDG_CACHE_HOME')) || `${home}/.cache`}/graph-in-pane`
-    const [{ tools, parserDirs }, osRelease, hasBrew] = await Promise.all([
-      resolveTools(host, options).then(async tools => ({
-        tools,
-        parserDirs: tools['ast-grep'] === undefined ? await nvimParserDirs(host, tools, options) : [],
-      })),
-      host.read('/etc/os-release').catch(() => ''),
-      host
-        .run(['sh', '-c', 'command -v brew'], { stdin: '' })
-        .catch(() => ({ exitCode: 1 }))
-        .then(result => result.exitCode === 0),
-    ])
-    const hints: Hints = { dot: installHint(osRelease, hasBrew, 'dot'), astGrep: installHint(osRelease, hasBrew, 'ast-grep') }
-    await update($, toolsAtom, () => tools)
-    await update($, metaAtom, meta => ({
-      cwd: e.cwd,
-      sessionTag: String(Date.now()),
-      cacheDir,
-      gen: meta?.gen ?? 0,
-      parserDirs,
-      hints,
-    }))
+    await setup($, options, e.cwd)
+    const { cacheDir } = await read($, metaAtom)
     // Pngs from sessions over a day old.
     void $.process.run(['find', cacheDir, '-name', '*.png', '-mtime', '+1', '-delete'], { stdin: '' }).catch(() => undefined)
     await $.command.register({ name: 'graph-tree', description: 'Graph a file or dir literally in the graph pane', argumentHint: '<file|dir>' })
@@ -249,15 +266,15 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  on('command.run', { command: 'graph-tree' }, async ($, e) => treeCommand($, e.args))
-  on('command.run', { command: '10kfv' }, async ($, e) => treeCommand($, e.args))
+  on('command.run', { command: 'graph-tree' }, async ($, e) => (await ready($, options), treeCommand($, e.args)))
+  on('command.run', { command: '10kfv' }, async ($, e) => (await ready($, options), treeCommand($, e.args)))
 
-  on('command.run', { command: 'graph-flow' }, async ($, e) => flowCommand($, e.args))
-  on('command.run', { command: '10kfo' }, async ($, e) => flowCommand($, e.args))
+  on('command.run', { command: 'graph-flow' }, async ($, e) => (await ready($, options), flowCommand($, e.args)))
+  on('command.run', { command: '10kfo' }, async ($, e) => (await ready($, options), flowCommand($, e.args)))
 
-  on('tool.call', { tool: 'mcp__graph-in-pane__graph_skeleton' }, async ($, e) => handleSkeleton($, e as Record<string, unknown>))
+  on('tool.call', { tool: 'mcp__graph-in-pane__graph_skeleton' }, async ($, e) => (await ready($, options), handleSkeleton($, e as Record<string, unknown>)))
 
-  on('tool.call', { tool: 'mcp__graph-in-pane__show_graph' }, async ($, e) => handleShowGraph($, e as Record<string, unknown>))
+  on('tool.call', { tool: 'mcp__graph-in-pane__show_graph' }, async ($, e) => (await ready($, options), handleShowGraph($, e as Record<string, unknown>)))
 
   on('command.run', { command: 'graph' }, async ($, e) => {
     if (e.args.trim() === 'off') {

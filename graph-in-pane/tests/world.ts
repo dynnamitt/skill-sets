@@ -112,6 +112,7 @@ export const world = (on: On, files: Record<string, FakeFile>): World => {
     return { text: e.text }
   })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.cwd', () => ({ value: '/fx' }))
   return w
 }
 
