@@ -128,11 +128,23 @@ async function openBox($: EngineInterface, n: number): Promise<void> {
   await showView($, await treeView(hostOf($), ctx, box.target, gen), 'push')
 }
 
+/** Whether the top view is a flow pane waiting on (or showing a failure for) this target. */
+function awaitsFlow(top: View | undefined, target: string): boolean {
+  return top !== undefined && top.mode === 'flow' && top.target === target && (top.waiting || top.error !== null)
+}
+
+/** Replaces the waiting flow view for a target with the error that ended the wait. */
+async function failWaiting($: EngineInterface, target: string, error: string): Promise<void> {
+  const top = topOf(await read($, navAtom))
+  if (top !== undefined && awaitsFlow(top, target)) await dispatch($, { type: 'replaceTop', view: { ...top, waiting: false, error } })
+}
+
 /** Serves graph_skeleton: the tree-sitter skeleton of a file or dir, as JSON. */
 async function handleSkeleton($: EngineInterface, input: Record<string, unknown>) {
   const meta = await read($, metaAtom)
   const tools = await read($, toolsAtom)
-  const [file = '', fn] = (await targetOf($, typeof input.target === 'string' ? input.target : '')).split('#')
+  const target = await targetOf($, typeof input.target === 'string' ? input.target : '')
+  const [file = '', fn] = target.split('#')
   const host = hostOf($)
   const stat = await host.stat(file)
   const isDir = stat?.kind === 'dir'
@@ -140,7 +152,10 @@ async function handleSkeleton($: EngineInterface, input: Record<string, unknown>
     stat === null
       ? { error: `not found: ${file}` }
       : await extractTarget(host, tools, file, isDir, meta.parserDirs, (meta.hints ?? EMPTY_HINTS).astGrep)
-  if (isFailure(sk)) return { isError: true as const, result: sk.error, text: sk.error }
+  if (isFailure(sk)) {
+    await failWaiting($, target, sk.error)
+    return { isError: true as const, result: sk.error, text: sk.error }
+  }
   // A file#fn target answers that function alone; a dir answers one line per file.
   const answer = fn !== undefined && fn !== '' ? narrow(sk, file, fn) : isDir ? summarize(sk) : sk
   return { result: JSON.stringify(answer) }
@@ -155,6 +170,7 @@ async function handleShowGraph($: EngineInterface, input: Record<string, unknown
   const view = await renderView(hostOf($), ctx, base, styleDot(parsed.dot), gen)
   if (view.error !== null) {
     const text = `dot failed: ${view.error}`
+    if (parsed.kind === 'flow') await failWaiting($, parsed.target, view.error)
     return { isError: true as const, result: text, text }
   }
   const nav = await read($, navAtom)
@@ -166,7 +182,7 @@ async function handleShowGraph($: EngineInterface, input: Record<string, unknown
       return { result: RESULT.stored }
     }
   }
-  const how = parsed.kind === 'flow' && top?.waiting === true && top.target === parsed.target ? 'replaceTop' : 'reset'
+  const how = parsed.kind === 'flow' && awaitsFlow(top, parsed.target) ? 'replaceTop' : 'reset'
   const { isPlaced } = await showView($, view, how)
   if (!isPlaced) $.ui.status(RESULT.status)
   return { result: isPlaced ? RESULT.shown : RESULT.hidden }
