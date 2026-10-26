@@ -72,8 +72,10 @@ const owner = (fns: readonly Fn[], line: number): string =>
 
 const quoted = (text: string): string | null => text.match(/['"]([^'"]+)['"]\s*;?\s*$/)?.[1] ?? null
 
+const unquoted = (text: string): string => text.replace(/^(['"])(.*)\1$/, '$2')
+
 const specOf = (lang: Lang, row: AstRow): string | null =>
-  lang === 'bash' ? (row.text.split(/\s+/)[1] ?? null) : quoted(row.text)
+  lang === 'bash' ? unquoted(row.text.split(/\s+/)[1] ?? '') || null : quoted(row.text)
 
 const depRows = (rows: readonly AstRow[], lang: Lang): AstRow[] =>
   rows.filter(row => row.ruleId === (lang === 'bash' ? 'source' : 'import'))

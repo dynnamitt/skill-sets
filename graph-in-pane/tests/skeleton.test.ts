@@ -107,3 +107,9 @@ test('a dir import resolves to its index, and a .js spec to its .ts source', asy
   expect(await resolve('/p/a.ts', './foo.js')).toBe('/p/foo.ts')
   expect(await resolve('/p/a.ts', './bar.js')).toBe('/p/bar.js')
 })
+
+test('a quoted bash source path is unquoted before resolving', async () => {
+  const at = { line: 0, column: 0 }
+  const rows = ['source "./lib.sh"', ". './lib.sh'"].map(text => ({ ruleId: 'source', text, start: at, end: at }))
+  expect(specsOf(rows, 'bash')).toEqual(['./lib.sh', './lib.sh'])
+})
