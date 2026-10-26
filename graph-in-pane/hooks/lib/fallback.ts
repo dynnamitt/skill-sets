@@ -1,8 +1,8 @@
 import type { PluginOptions } from 'claude-code'
 
 import type { Tools } from '../../types'
-import { type Failure, RUN_TIMEOUT_MS } from './extract'
-import type { Host } from './host'
+import type { Failure } from './extract'
+import { type Host, RUN_TIMEOUT_MS } from './host'
 import { dirOf } from './path'
 import type { AstRow, Lang } from './skeleton'
 

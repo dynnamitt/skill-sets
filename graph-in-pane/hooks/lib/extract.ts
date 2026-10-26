@@ -1,6 +1,6 @@
 import type { Tools } from '../../types'
 import { fallbackRows } from './fallback'
-import { type Host, mapLimit, safely } from './host'
+import { type Host, mapLimit, RUN_TIMEOUT_MS, safely } from './host'
 import { base, dirOf, normalize } from './path'
 import { RULES } from './rules'
 import { type AstRow, type FileSkeleton, fileSkeleton, type Lang, langOf, langOfShebang, type Skeleton, specsOf, toRows } from './skeleton'
@@ -11,8 +11,6 @@ export const MAX_FILES = 200
 export const MAX_LISTED = 2000
 /** The most extractions (or probes) in flight at once. */
 export const EXTRACT_CONCURRENCY = 8
-/** The longest an ast-grep or tree-sitter run may take, in ms. */
-export const RUN_TIMEOUT_MS = 30000
 const PROBE_BATCH = 64
 const IGNORED_DIRS: ReadonlySet<string> = new Set(['node_modules', 'dist', 'build', 'target', '.venv'])
 

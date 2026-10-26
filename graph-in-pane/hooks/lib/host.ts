@@ -1,5 +1,8 @@
 import type { EngineInterface, FsEntry, ProcessRunInit, ProcessRunResult } from 'claude-code'
 
+/** The longest an ast-grep or tree-sitter run may take, in ms. */
+export const RUN_TIMEOUT_MS = 30000
+
 /** The environment variables the mod reads; `$.env.get` takes literal names. */
 export type EnvName = 'HOME' | 'XDG_CACHE_HOME' | 'XDG_DATA_HOME'
 

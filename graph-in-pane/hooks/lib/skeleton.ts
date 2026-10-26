@@ -7,6 +7,7 @@ export type AstRow = { ruleId: string; text: string; start: Pos; end: Pos }
 export type Fn = { name: string; startLine: number; endLine: number }
 /** `from` is a function name or `(top)`. */
 export type Call = { from: string; to: string; line: number; kind: 'fn' | 'external' }
+/** A bash `exit` and its code, null when not a number. */
 export type Exit = { from: string; code: number | null; line: number }
 /** `resolved` is the absolute path of an own file, else null. */
 export type Dep = { from: string; spec: string; resolved: string | null; line: number }
@@ -67,7 +68,11 @@ export const langOfShebang = (text: string): Lang | null => {
 
 type JsonRow = { ruleId: string; text: string; range: { start: Pos; end: Pos } }
 
-/** ast-grep `--json=stream` output (or recorded rows) as AstRows. */
+/**
+ * ast-grep `--json=stream` output (or recorded rows) as AstRows.
+ * @param {string | readonly JsonRow[]} input the stream text, or rows already parsed
+ * @returns {AstRow[]} the rows
+ */
 export const toRows = (input: string | readonly JsonRow[]): AstRow[] =>
   (typeof input === 'string'
     ? input
