@@ -10,18 +10,38 @@ import type { Skeleton } from './skeleton'
 /** What rendering needs from the session: tools, where pngs go, the fallback parsers. */
 export type RenderCtx = { tools: Tools; cacheDir: string; sessionTag: string; parserDirs: readonly string[]; hints: Hints }
 
-/** A command argument as an absolute path: quotes stripped, `~` expanded, relative joined. */
+/**
+ * A command argument as an absolute path: quotes stripped, `~` expanded, relative joined.
+ * @param {string} arg the raw argument
+ * @param {string} cwd the base for a relative path
+ * @param {string} home what `~` stands for
+ * @returns {string} a normalized absolute path
+ */
 export const resolveTarget = (arg: string, cwd: string, home: string): string => {
   const bare = arg.trim().replace(/^(['"])(.*)\1$/, '$2')
   return normalize(bare.startsWith('~/') ? `${home}/${bare.slice(2)}` : bare.startsWith('/') ? bare : `${cwd}/${bare}`)
 }
 
+/**
+ * A view's title: the function name for `file#fn`, else the file's base name.
+ * @param {string} target a path or `${file}#${fn}`
+ * @returns {string} the title
+ */
 export const titleOf = (target: string): string => {
   const [file, fn] = target.split('#')
   return fn !== undefined && fn !== '' ? fn : base(file ?? target)
 }
 
-/** Draws DOT into a fresh png for `view`; errors land on the view. */
+/**
+ * Draws DOT into a fresh png for `view`; errors land on the view.
+ * @param {Host} host runs dot
+ * @param {RenderCtx} ctx tools, cache dir and hints
+ * @param {View} view the view to update
+ * @param {string} dot the DOT source
+ * @param {number} gen the picture's generation
+ * @param {Pick<RenderOptions, 'unflatten'>} [options] whether to unflatten
+ * @returns {Promise<View>} the view with its picture, or with the error
+ */
 export const renderView = async (
   host: Host,
   ctx: RenderCtx,
@@ -66,7 +86,14 @@ export const flowCheck = async (host: Host, file: string): Promise<{ files: numb
   return files.length === 0 ? { error: `no bash, TypeScript or JavaScript files under ${file}` } : { files: files.length }
 }
 
-/** The literal view of a file, dir, `${file}#${fn}` or .dot file; failures land on the view, never thrown. */
+/**
+ * The literal view of a file, dir, `${file}#${fn}` or .dot file; failures land on the view, never thrown.
+ * @param {Host} host the session host
+ * @param {RenderCtx} ctx tools, parser dirs and hints
+ * @param {string} target an absolute path, or `${file}#${fn}`
+ * @param {number} gen the picture's generation
+ * @returns {Promise<View>} the drawn view, or one carrying the error
+ */
 export const treeView = async (host: Host, ctx: RenderCtx, target: string, gen: number): Promise<View> => {
   const [file = target] = target.split('#')
   const view = emptyView(file.endsWith('.dot') ? 'dot' : 'tree', titleOf(target), target)
@@ -90,6 +117,11 @@ export const treeView = async (host: Host, ctx: RenderCtx, target: string, gen: 
 /**
  * Redraws a .dot view when its file changed since it was drawn; null when unchanged.
  * A bad save keeps the last good picture under the error, and the next good save clears it.
+ * @param {Host} host the session host
+ * @param {RenderCtx} ctx tools, cache dir and hints
+ * @param {View} view the .dot view
+ * @param {() => Promise<number>} nextGen takes the next picture generation
+ * @returns {Promise<View | null>} the redrawn view, else null
  */
 export const redrawDot = async (
   host: Host,
@@ -108,6 +140,10 @@ export const redrawDot = async (
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 'es'}`
 
-/** The one line a command answers with; the engine already names the plugin. */
+/**
+ * The one line a command answers with; the engine already names the plugin.
+ * @param {View} view the drawn view
+ * @returns {string} the error, else a "drew ..." line
+ */
 export const summary = (view: View): string =>
   view.error ?? `drew ${view.title} (${plural(view.openable.length, 'box')} to open)`

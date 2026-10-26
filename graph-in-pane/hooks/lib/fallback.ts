@@ -1,10 +1,13 @@
 import type { PluginOptions } from 'claude-code'
 
 import type { Tools } from '../../types'
-import type { Failure } from './extract'
+import { type Failure, RUN_TIMEOUT_MS } from './extract'
 import type { Host } from './host'
 import { dirOf } from './path'
 import type { AstRow, Lang } from './skeleton'
+
+/** How long the nvim probe for parser dirs may take, in ms. */
+const NVIM_TIMEOUT_MS = 10000
 
 type Pos = { line: number; column: number }
 type Node = { kind: string; field: string | null; start: Pos; end: Pos; children: Node[] }
@@ -71,7 +74,13 @@ const ruleOf = (lang: Lang, node: Node, nameText: (node: Node) => string | null)
   return node.kind === 'call_expression' ? 'call' : node.kind === 'import_statement' ? 'import' : null
 }
 
-/** Rows matching rules.ts's rule ids, from `tree-sitter parse` output and the source. */
+/**
+ * Rows matching rules.ts's rule ids, from `tree-sitter parse` output and the source.
+ * @param {string} sexp the `tree-sitter parse` output
+ * @param {string} source the file's text, for the node text
+ * @param {Lang} lang the file's language
+ * @returns {AstRow[]} rows in source order
+ */
 export const sexpToRows = (sexp: string, source: string, lang: Lang): AstRow[] => {
   const slice = slicer(source)
   const nameText = (command: Node): string | null => {
@@ -84,7 +93,11 @@ export const sexpToRows = (sexp: string, source: string, lang: Lang): AstRow[] =
   })
 }
 
-/** Where parser .so files may be: the option, nvim's runtimepath, then XDG defaults. */
+/**
+ * Where parser .so files may be: the option, nvim's runtimepath, then XDG defaults.
+ * @param {{ option: string; nvimFiles: string; dataHome: string }} from the option value, nvim's newline-joined parser files, and the XDG data home
+ * @returns {string[]} unique, non-empty dirs in priority order
+ */
 export const parserDirsFrom = (from: { option: string; nvimFiles: string; dataHome: string }): string[] => [
   ...new Set(
     [
@@ -101,12 +114,19 @@ export const parserDirsFrom = (from: { option: string; nvimFiles: string; dataHo
 
 const NVIM_LUA = 'lua io.write(table.concat(vim.api.nvim_get_runtime_file("parser/*.so", true), "\\n"))'
 
+/**
+ * The parser dirs for this session: asks nvim for its runtimepath parsers, then adds the defaults.
+ * @param {Host} host runs nvim and reads env
+ * @param {Tools} tools the resolved tool paths
+ * @param {PluginOptions} options the plugin options (`nvimParserDir`)
+ * @returns {Promise<string[]>} parser dirs in priority order
+ */
 export const nvimParserDirs = async (host: Host, tools: Tools, options: PluginOptions): Promise<string[]> => {
   const nvim = tools.nvim
   const nvimFiles =
     nvim === undefined
       ? ''
-      : (await host.run([nvim, '--headless', '-c', NVIM_LUA, '-c', 'q'], { stdin: '', timeoutMs: 10000 }).catch(
+      : (await host.run([nvim, '--headless', '-c', NVIM_LUA, '-c', 'q'], { stdin: '', timeoutMs: NVIM_TIMEOUT_MS }).catch(
           () => ({ stdout: '' }),
         )).stdout
   const home = (await host.env('HOME')) ?? ''
@@ -114,7 +134,16 @@ export const nvimParserDirs = async (host: Host, tools: Tools, options: PluginOp
   return parserDirsFrom({ option: String(options.nvimParserDir ?? ''), nvimFiles, dataHome })
 }
 
-/** Rows for one file through the tree-sitter CLI and a prebuilt parser. */
+/**
+ * Rows for one file through the tree-sitter CLI and a prebuilt parser.
+ * @param {Host} host runs tree-sitter and reads the file
+ * @param {Tools} tools the resolved tool paths
+ * @param {readonly string[]} dirs dirs that may hold `<lang>.so`
+ * @param {string} file absolute file path
+ * @param {Lang} lang the file's language
+ * @param {string} [missing] the error text when tree-sitter is not installed
+ * @returns {Promise<AstRow[] | Failure>} the rows, else why not
+ */
 export const fallbackRows = async (
   host: Host,
   tools: Tools,
@@ -132,7 +161,7 @@ export const fallbackRows = async (
   if (so === undefined || so === null) return { error: `no ${lang} parser for tree-sitter` }
   const { exitCode, stdout, stderr } = await host.run(
     [treeSitter, 'parse', '--lib-path', so, '--lang-name', lang, file],
-    { stdin: '', timeoutMs: 30000 },
+    { stdin: '', timeoutMs: RUN_TIMEOUT_MS },
   )
   if (exitCode !== 0 && stdout.trim() === '') return { error: `tree-sitter failed: ${stderr.split('\n')[0] ?? ''}` }
   return sexpToRows(stdout, await host.read(file), lang)

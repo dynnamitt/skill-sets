@@ -5,12 +5,25 @@ import { base, dirOf, normalize } from './path'
 import { RULES } from './rules'
 import { type AstRow, type FileSkeleton, fileSkeleton, type Lang, langOf, langOfShebang, type Skeleton, specsOf, toRows } from './skeleton'
 
+/** The most files a dir graph covers; the rest are counted as omitted. */
 export const MAX_FILES = 200
-export const MAX_LISTED = 2000, EXTRACT_CONCURRENCY = 8
+/** The most source files a dir walk collects before it stops. */
+export const MAX_LISTED = 2000
+/** The most extractions (or probes) in flight at once. */
+export const EXTRACT_CONCURRENCY = 8
+/** The longest an ast-grep or tree-sitter run may take, in ms. */
+export const RUN_TIMEOUT_MS = 30000
 const PROBE_BATCH = 64
 const IGNORED_DIRS: ReadonlySet<string> = new Set(['node_modules', 'dist', 'build', 'target', '.venv'])
 
+/** A step that failed: what to show the user. */
 export type Failure = { error: string }
+
+/**
+ * Tells a Failure from a result.
+ * @param {unknown} value a result or a Failure
+ * @returns {boolean} true when `value` is a Failure
+ */
 export const isFailure = (value: unknown): value is Failure =>
   typeof value === 'object' && value !== null && 'error' in value
 
@@ -18,7 +31,11 @@ const SCRIPT_TRIES = ['', '.ts', '.tsx', '.mts', '.js', '.mjs', '.jsx', '/index.
 // An ESM-style `.js` spec names a `.ts` source: try these stems first.
 const JS_TO_TS: Readonly<Record<string, string>> = { '.js': '.ts', '.jsx': '.tsx', '.mjs': '.mts' }
 
-/** Resolves a relative dependency spec to an existing own file (never a dir), else null. */
+/**
+ * Resolves a relative dependency spec to an existing own file (never a dir), else null.
+ * @param {Host} host stats the candidate paths
+ * @returns {(fromFile: string, spec: string) => Promise<string | null>} the resolver: importing file and spec in, absolute file path or null out
+ */
 export const ownResolver =
   (host: Host) =>
   async (fromFile: string, spec: string): Promise<string | null> => {
@@ -33,6 +50,7 @@ export const ownResolver =
     return found.find(path => path !== null) ?? null
   }
 
+/** A source file and its language. */
 export type SourceFile = { path: string; lang: Lang }
 
 /**
@@ -54,7 +72,12 @@ export const noGrammar = (path: string): string => {
   return `no grammar for ${name.includes('.') ? name.slice(name.lastIndexOf('.')) : name}`
 }
 
-/** The source files under a dir, ignored dirs skipped, sorted, capped at MAX_FILES. The walk stops at MAX_LISTED. */
+/**
+ * The source files under a dir, ignored dirs skipped, sorted, capped at MAX_FILES. The walk stops at MAX_LISTED.
+ * @param {Host} host lists dirs and reads files
+ * @param {string} dir absolute dir path
+ * @returns {Promise<{ files: SourceFile[]; omitted: number }>} up to MAX_FILES files, and how many more there were
+ */
 export const listSourceFiles = async (host: Host, dir: string): Promise<{ files: SourceFile[]; omitted: number }> => {
   // Probes entries in batches, bounded, until `room` source files are found.
   const probe = async (paths: readonly string[], room: number, found: SourceFile[] = []): Promise<SourceFile[]> => {
@@ -92,13 +115,22 @@ export const listSourceFiles = async (host: Host, dir: string): Promise<{ files:
 const astGrepRows = async (host: Host, astGrep: string, file: string, lang: Lang): Promise<AstRow[] | Failure> => {
   const { exitCode, stdout, stderr, isStdoutTruncated } = await host.run(
     [astGrep, 'scan', '--inline-rules', RULES[lang], '--json=stream', file],
-    { stdin: '', timeoutMs: 30000 },
+    { stdin: '', timeoutMs: RUN_TIMEOUT_MS },
   )
   if (isStdoutTruncated) return { error: `${file} is too large to graph (ast-grep output over 4 MiB)` }
   return exitCode !== 0 && stdout.trim() === '' ? { error: `ast-grep failed: ${stderr.split('\n')[0] ?? ''}` } : toRows(stdout)
 }
 
-/** One file's skeleton: ast-grep, else the tree-sitter CLI with a parser from `parserDirs`. */
+/**
+ * One file's skeleton: ast-grep, else the tree-sitter CLI with a parser from `parserDirs`.
+ * @param {Host} host runs the tools and stats files
+ * @param {Tools} tools the resolved tool paths
+ * @param {string} file absolute file path
+ * @param {Lang} lang the file's language
+ * @param {readonly string[]} [parserDirs] dirs holding tree-sitter parsers
+ * @param {string} [missing] the error text when no tool can parse
+ * @returns {Promise<FileSkeleton | Failure>} the skeleton, else why not
+ */
 export const extractFile = async (
   host: Host,
   tools: Tools,
@@ -123,7 +155,16 @@ export const extractFile = async (
   return fileSkeleton(file, lang, rows, spec => resolved.get(spec) ?? null)
 }
 
-/** The skeleton of a file or a dir of source files. */
+/**
+ * The skeleton of a file or a dir of source files.
+ * @param {Host} host runs the tools and lists dirs
+ * @param {Tools} tools the resolved tool paths
+ * @param {string} path absolute path of a file or dir
+ * @param {boolean} isDir whether `path` is a dir
+ * @param {readonly string[]} [parserDirs] dirs holding tree-sitter parsers
+ * @param {string} [missing] the error text when no tool can parse
+ * @returns {Promise<Skeleton | Failure>} the skeleton, else why not
+ */
 export const extractTarget = async (
   host: Host,
   tools: Tools,

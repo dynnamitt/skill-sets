@@ -16,7 +16,11 @@ export type Host = {
   stat: (path: string) => Promise<{ kind: 'file' | 'dir' | 'other'; mtimeMs: number } | null>
 }
 
-// A function declaration: the engine follows `$` past an import only into one.
+/**
+ * The engine's `$` as a Host. A function declaration: the engine follows `$` past an import only into one.
+ * @param {EngineInterface} $ the engine handed to a hook
+ * @returns {Host} process, fs and env access over `$`
+ */
 export function hostOf($: EngineInterface): Host {
   return {
     run: (argv, init) => $.process.run(argv, init),
@@ -39,7 +43,13 @@ export function hostOf($: EngineInterface): Host {
 
 const RESULT = { stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
 
-/** A process result, for fakes. */
+/**
+ * A process result, for fakes.
+ * @param {number} exitCode the exit code
+ * @param {string} [stdout] captured stdout
+ * @param {string} [stderr] captured stderr
+ * @returns {ProcessRunResult} a result with no truncation
+ */
 export const ran = (exitCode: number, stdout = '', stderr = ''): ProcessRunResult => ({
   ...RESULT,
   exitCode,
@@ -47,10 +57,19 @@ export const ran = (exitCode: number, stdout = '', stderr = ''): ProcessRunResul
   stderr,
 })
 
-/** The message of anything thrown. */
+/**
+ * The message of anything thrown.
+ * @param {unknown} err the thrown value
+ * @returns {string} its `message` for an Error, else its string form
+ */
 export const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
-/** Runs `work`; a rejection becomes `onError(message)` instead of escaping a hook. */
+/**
+ * Runs `work`; a rejection becomes `onError(message)` instead of escaping a hook.
+ * @param {() => Promise<T>} work the async job
+ * @param {(message: string) => T} onError builds the fallback from the error message
+ * @returns {Promise<T>} the job's result, else the fallback
+ */
 export const safely = async <T>(work: () => Promise<T>, onError: (message: string) => T): Promise<T> => {
   try {
     return await work()

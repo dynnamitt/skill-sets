@@ -2,9 +2,14 @@ import type { Openable } from '../../types'
 import { base } from './path'
 import { type Call, type FileSkeleton, type Skeleton, TOP } from './skeleton'
 
+const ALT_MAX = 400
+const MAX_EXTERNALS = 12, BIG_FN_LINES = 12, MAX_FN_OPENABLE = 9
+
 export type { Openable }
+/** A DOT graph and the boxes in it the user can open. */
 export type Graph = { dot: string; openable: Openable[] }
 
+/** The palette every graph uses (Catppuccin Mocha). */
 export const COLORS = {
   bg: '#1e1e2e',
   fill: '#313244',
@@ -40,10 +45,6 @@ export const styleDot = (dot: string): string => {
   const at = header ? header[0].length : dot.indexOf('{') + 1
   return at === 0 ? dot : `${dot.slice(0, at)}\n${STYLE}\n${dot.slice(at)}`
 }
-
-const MAX_EXTERNALS = 12
-const BIG_FN_LINES = 12
-const MAX_FN_OPENABLE = 9
 
 const q = (text: string): string => `"${text.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
 const circled = (n: number): string => (n <= 20 ? String.fromCodePoint(0x2460 + n - 1) : `(${n})`)
@@ -134,27 +135,46 @@ const dirGraph = (sk: Skeleton): Graph => {
   return { dot: wrap(lines), openable }
 }
 
-/** The literal graph of a skeleton; `focus` narrows it to one file or `${file}#${fn}`. */
+/**
+ * The literal graph of a skeleton; `focus` narrows it to one file or `${file}#${fn}`.
+ * @param {Skeleton} sk the skeleton to draw
+ * @param {string} [focus] a file path or `${file}#${fn}`
+ * @returns {Graph} the styled DOT and its openable boxes
+ */
 export const treeGraph = (sk: Skeleton, focus?: string): Graph => {
   const [focusFile, focusFn] = (focus ?? '').split('#')
   const file = sk.files.find(f => f.file === focusFile) ?? (sk.files.length === 1 ? sk.files[0] : undefined)
   return file === undefined ? dirGraph(sk) : fileGraph(file, focusFn === undefined || focusFn === '' ? null : focusFn)
 }
 
-/** Node labels in order, for terminals that cannot draw the picture. */
+/**
+ * Node labels in order, for terminals that cannot draw the picture.
+ * @param {string} dot the DOT source
+ * @returns {string} labels joined with ` · `, cut to ALT_MAX characters
+ */
 export const altOutline = (dot: string): string => {
   const labels = [...dot.matchAll(/^\s*"(?:[^"\\]|\\.)*"\s*\[[^\n]*?label="((?:[^"\\]|\\.)*)"/gm)].map(m =>
     (m[1] ?? '').replace(/\\n/g, ' ').replace(/\\(.)/g, '$1'),
   )
   const names = labels.length > 0 ? labels : unique([...dot.matchAll(/"?([A-Za-z0-9_:./-]+)"?\s*->/g)].map(m => m[1] ?? ''))
   const text = names.join(' · ')
-  return text.length > 400 ? `${text.slice(0, 399)}…` : text || 'graph'
+  return text.length > ALT_MAX ? `${text.slice(0, ALT_MAX - 1)}…` : text || 'graph'
 }
 
-/** The png a session renders into; one per session so sessions never clash. */
+/**
+ * The png a session renders into; one per session so sessions never clash.
+ * @param {string} cacheDir the plugin's cache dir
+ * @param {string} sessionTag the session's tag
+ * @returns {string} the png path
+ */
 export const pngPath = (cacheDir: string, sessionTag: string): string => `${cacheDir}/${sessionTag}.png`
 
-/** The cell box that shows a picture whole: cells are twice as tall as wide. */
+/**
+ * The cell box that shows a picture whole: cells are twice as tall as wide.
+ * @param {{ w: number; h: number }} px the picture's size in pixels
+ * @param {{ columns: number; rows: number }} room the cells available
+ * @returns {{ columns: number; rows: number }} the largest box that fits `room` at the picture's aspect
+ */
 export const fitBox = (
   px: { w: number; h: number },
   room: { columns: number; rows: number },

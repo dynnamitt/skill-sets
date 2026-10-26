@@ -26,8 +26,9 @@ import { isPlanningSkill, PLAN_SECTION_ID, PLAN_TEXT, type PlanEvent, planTransi
 import { installHint, resolveTools, type Tools } from './lib/tools'
 import { narrow, summarize } from './lib/skeleton'
 
+/** The id of the graph pane. */
 export const PANE_ID = 'graph'
-const DOT_POLL_MS = 1000
+const DOT_POLL_MS = 1000, DEFAULT_ROWS = 24
 
 // The engine reads `$.state` keys off this file's own consts, so every atom
 // lives here; lib/ stays pure or takes a Host.
@@ -186,6 +187,12 @@ async function pollDot($: EngineInterface): Promise<void> {
   if (redrawn !== null) await dispatch($, { type: 'replaceIf', was: top, view: redrawn })
 }
 
+/**
+ * The mod's hooks module: session start, the /graph commands, the show_graph and graph_skeleton tools, and plan tracking.
+ * @param {Parameters<Register>[0]} on registers a hook for an event
+ * @param {Parameters<Register>[1]} options the plugin options
+ * @returns {void}
+ */
 export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const host = hostOf($)
@@ -295,7 +302,7 @@ export const register: Register = (on, options) => {
     return paneTree(
       $.ui.resolve(e),
       nav,
-      { surface: e.surface, bodyColumns: e.props.bodyColumns, rows: e.viewport?.rows ?? 24, isFocused: e.props.isFocused },
+      { surface: e.surface, bodyColumns: e.props.bodyColumns, rows: e.viewport?.rows ?? DEFAULT_ROWS, isFocused: e.props.isFocused },
       {
         back: () => void dispatch($, { type: 'pop' }),
         open: n => void openBox($, n),

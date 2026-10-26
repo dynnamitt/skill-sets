@@ -1,4 +1,8 @@
-/** Collapses `.` and `..` segments and empty parts of an absolute path. */
+/**
+ * Collapses `.` and `..` segments and empty parts of an absolute path.
+ * @param {string} path an absolute path, possibly with `.`, `..` or `//`
+ * @returns {string} the cleaned absolute path
+ */
 export const normalize = (path: string): string =>
   `/${path
     .split('/')
