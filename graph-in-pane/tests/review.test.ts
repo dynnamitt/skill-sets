@@ -51,6 +51,16 @@ test('review 3: a bad save of a followed .dot keeps the last picture and recover
   expect(top(w)?.gen).toBeGreaterThan(good?.gen ?? 0)
 })
 
+test('review 3b: a poll that finishes after a newer view was shown does not overwrite it', async ($, on) => {
+  const w = world(on, FILES)
+  await start($)
+  await runCommand($, 'graph-tree', 'x.dot')
+  w.files['/fx/x.dot'] = { kind: 'file', text: 'digraph x { a -> c }', mtimeMs: 6 }
+  w.beforeDot = async () => void (await runCommand($, 'graph-tree', 'pair.sh'))
+  await w.clock.advance(1000)
+  expect([top(w)?.target, top(w)?.mode]).toEqual(['/fx/pair.sh', 'tree'])
+})
+
 test('review 4a: an unreadable subfolder is skipped, not fatal', async ($, on) => {
   const w = world(on, { ...FILES, '/fx/secret': { kind: 'dir' } })
   w.denied = ['/fx/secret']

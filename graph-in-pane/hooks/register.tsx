@@ -178,7 +178,7 @@ async function pollDot($: EngineInterface): Promise<void> {
   if (top === undefined || top.mode !== 'dot') return
   const ctx = ctxOf(await read($, metaAtom), await read($, toolsAtom))
   const redrawn = await redrawDot(hostOf($), ctx, top, async () => (await renderCtx($)).gen).catch(() => null)
-  if (redrawn !== null) await dispatch($, { type: 'replaceTop', view: redrawn })
+  if (redrawn !== null) await dispatch($, { type: 'replaceIf', was: top, view: redrawn })
 }
 
 export const register: Register = (on, options) => {
@@ -209,7 +209,15 @@ export const register: Register = (on, options) => {
     await $.tool.register({ name: SKELETON, description: SKELETON_DESCRIPTION, inputSchema: SKELETON_SCHEMA, isDeferred: false })
     await $.tool.register({ name: SHOW_GRAPH, description: SHOW_GRAPH_DESCRIPTION, inputSchema: SHOW_GRAPH_SCHEMA, isDeferred: false })
     await $.command.register({ name: 'graph', description: 'Reopen the graph pane (latest plan graph first); /graph off stops plan graphs', argumentHint: '[off]' })
-    $.clock.every(DOT_POLL_MS, () => void pollDot($))
+    // One poll at a time: a slow dot run must not be raced by the next tick.
+    let isPolling = false
+    $.clock.every(DOT_POLL_MS, () => {
+      if (isPolling) return
+      isPolling = true
+      void pollDot($).finally(() => {
+        isPolling = false
+      })
+    })
 
     return next(e)
   })

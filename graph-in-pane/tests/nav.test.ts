@@ -41,3 +41,10 @@ test('replaceTop swaps only the shown view', async () => {
   const nav = navReduce({ stack: [view('a'), view('b')] }, { type: 'replaceTop', view: view('c') })
   expect(nav.stack.map(v => v.title)).toEqual(['a', 'c'])
 })
+
+test('replaceIf leaves a top that changed meanwhile', async () => {
+  const a = emptyView('dot', 'a', '/a.dot'), b = emptyView('tree', 'b', '/b.sh')
+  const nav = { stack: [b] }
+  expect(navReduce(nav, { type: 'replaceIf', was: a, view: { ...a, gen: 2 } })).toBe(nav)
+  expect(navReduce({ stack: [a] }, { type: 'replaceIf', was: a, view: { ...a, gen: 2 } }).stack[0]?.gen).toBe(2)
+})

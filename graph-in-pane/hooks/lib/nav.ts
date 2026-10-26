@@ -8,6 +8,7 @@ export type NavAction =
   | { type: 'push'; view: View }
   | { type: 'pop' }
   | { type: 'replaceTop'; view: View }
+  | { type: 'replaceIf'; was: View; view: View }
   | { type: 'page' }
 
 export const emptyView = (mode: Mode, title: string, target: string): View => ({
@@ -44,6 +45,10 @@ export const navReduce = (nav: Nav, action: NavAction): Nav => {
       return nav.stack.length > 1 ? { stack: nav.stack.slice(0, -1) } : nav
     case 'replaceTop':
       return withTop(nav, action.view)
+    case 'replaceIf':
+      return top !== undefined && top.mode === action.was.mode && top.target === action.was.target && top.gen === action.was.gen
+        ? withTop(nav, action.view)
+        : nav
     case 'page':
       return top === undefined ? nav : withTop(nav, { ...top, page: (top.page + 1) % pages(top) })
   }
