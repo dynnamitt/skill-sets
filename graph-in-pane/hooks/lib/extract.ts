@@ -16,7 +16,8 @@ export const MAX_VISITED_DIRS = 500
 /** Extension-less files over this many bytes are not probed for a shebang. */
 export const MAX_PROBE_BYTES = 64 * 1024
 const PROBE_BATCH = 64
-const IGNORED_DIRS: ReadonlySet<string> = new Set(['node_modules', 'dist', 'build', 'target', '.venv'])
+/** Dirs a walk never enters, besides dot-dirs. */
+export const IGNORED_DIRS: ReadonlySet<string> = new Set(['node_modules', 'dist', 'build', 'target', '.venv'])
 
 /** A step that failed: what to show the user. */
 export type Failure = { error: string }

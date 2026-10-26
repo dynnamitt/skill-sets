@@ -43,6 +43,18 @@ test('graph_skeleton on a missing file is an error', async ($, on) => {
   expect(result.isError).toBe(true)
 })
 
+test('after a /clear the tools and cwd are found again on first use', async ($, on) => {
+  const w = world(on, FILES)
+  await start($)
+  // A /clear starts a session with fresh state and no session.start.
+  w.state = {}
+  expect(String((await skeleton($, '/fx/pair.sh')).result)).toContain('"name":"pick"')
+  expect(textOf(await show($, { kind: 'plan', title: 'plan', dot: 'digraph p { a -> b }' }))).not.toContain('not found')
+  w.state = {}
+  await runCommand($, 'graph-tree', 'pair.sh')
+  expect(nav(w).stack.map(v => [v.target, v.error])).toEqual([['/fx/pair.sh', null]])
+})
+
 test('a flow graph is shown in the pane', async ($, on) => {
   const w = world(on, FILES)
   await start($)

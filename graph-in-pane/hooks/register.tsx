@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, PluginOptions, PromptAutocompleteSuggestion, Register } from 'claude-code'
 
 import type { Hints, Meta, Nav, PlanState, View } from '../types'
-import { flowCheck, redrawDot, type RenderCtx, renderView, resolveTarget, skeletonOf, summary, treeView } from './lib/commands'
+import { flowCheck, redrawDot, type RenderCtx, renderView, resolveTarget, skeletonOf, summary, titleOf, treeView } from './lib/commands'
 import { styleDot } from './lib/dot'
 import { isFailure } from './lib/extract'
 import { nvimParserDirs } from './lib/fallback'
@@ -19,12 +19,13 @@ import {
   SKELETON_SCHEMA,
   waitingView,
 } from './lib/flow'
-import { hostOf } from './lib/host'
+import { type Host, hostOf } from './lib/host'
 import { emptyView, type NavAction, navReduce, topOf } from './lib/nav'
 import { paneTree } from './lib/pane'
+import { isPickToken, listCandidates, nearPaths, notFoundText, PICK_CACHE_MS, pickRoot, rank } from './lib/pick'
 import { isPlanningSkill, PLAN_SECTION_ID, PLAN_TEXT, type PlanEvent, planTransition } from './lib/plan'
 import { installHint, resolveTools, type Tools } from './lib/tools'
-import { narrow, summarize } from './lib/skeleton'
+import { langOf, narrow, summarize } from './lib/skeleton'
 
 /** The id of the graph pane. */
 export const PANE_ID = 'graph'
@@ -42,6 +43,9 @@ const toolsAtom = atom({ plugin: 'graph-in-pane', key: 'tools' } as const, EMPTY
 const navAtom = atom({ plugin: 'graph-in-pane', key: 'nav' } as const, EMPTY_NAV, { shape: 'nav-1' })
 const planAtom = atom({ plugin: 'graph-in-pane', key: 'plan' } as const, EMPTY_PLAN, { shape: 'plan-1' })
 const metaAtom = atom({ plugin: 'graph-in-pane', key: 'meta' } as const, EMPTY_META, { shape: 'meta-1' })
+
+// A root's listing, reused while the person types; a reload starts it over.
+const pickCache = new Map<string, { at: number; paths: readonly string[] }>()
 
 async function planEvent($: EngineInterface, event: PlanEvent): Promise<void> {
   await update($, planAtom, plan => planTransition(plan ?? EMPTY_PLAN, event))
@@ -86,8 +90,9 @@ async function targetOf($: EngineInterface, args: string): Promise<string> {
   return resolveTarget(args, meta.cwd, home)
 }
 
-async function treeCommand($: EngineInterface, args: string): Promise<{ text: string }> {
-  return treeTarget($, await targetOf($, args))
+async function treeCommand($: EngineInterface, command: string, args: string): Promise<{ text: string }> {
+  const target = await targetOf($, args)
+  return (await lostTarget($, command, target, 'tree')) ?? treeTarget($, target)
 }
 
 async function treeTarget($: EngineInterface, target: string): Promise<{ text: string }> {
@@ -113,10 +118,45 @@ async function flowAsk($: EngineInterface, target: string, how: 'reset' | 'push'
   return { text: flowSummary(target, checked.files) }
 }
 
-async function flowCommand($: EngineInterface, args: string): Promise<{ text: string }> {
+async function flowCommand($: EngineInterface, command: string, args: string): Promise<{ text: string }> {
   const target = await targetOf($, args)
   // A .dot file is drawn as written by either command.
-  return target.endsWith('.dot') ? treeTarget($, target) : flowAsk($, target, 'reset')
+  const isDot = target.endsWith('.dot')
+  return (await lostTarget($, command, target, isDot ? 'tree' : 'flow')) ?? (isDot ? treeTarget($, target) : flowAsk($, target, 'reset'))
+}
+
+/** A root's candidates, listed again once the cached listing is older than PICK_CACHE_MS. */
+async function cachedCandidates(host: Host, root: string): Promise<readonly string[]> {
+  const cached = pickCache.get(root)
+  if (cached !== undefined && Date.now() - cached.at < PICK_CACHE_MS) return cached.paths
+  const paths = await listCandidates(host, root)
+  pickCache.set(root, { at: Date.now(), paths })
+  return paths
+}
+
+/** For a file that does not exist: the not-found error naming the paths it may have meant; null when it exists. */
+async function missingTarget($: EngineInterface, file: string): Promise<{ error: string; near: string[] } | null> {
+  const host = hostOf($)
+  if ((await host.stat(file)) !== null) return null
+  const near = await nearPaths(host, (await read($, toolsAtom)).fzf, file, cachedCandidates)
+  return { error: notFoundText(file, near), near }
+}
+
+/** A command's missing target: shows the error with its near paths and proposes the closest as the next prompt; null when it exists. */
+async function lostTarget($: EngineInterface, command: string, target: string, mode: 'tree' | 'flow'): Promise<{ text: string } | null> {
+  const [file = target, fn] = target.split('#')
+  const missing = await missingTarget($, file)
+  if (missing === null) return null
+  const base = mode === 'flow' ? emptyView('flow', file, target) : emptyView(file.endsWith('.dot') ? 'dot' : 'tree', titleOf(target), target)
+  await showView($, { ...base, error: missing.error }, (await read($, navAtom)).stack.length > 0 ? 'push' : 'reset')
+  const [best] = missing.near
+  if (best !== undefined) {
+    const home = (await $.env.get('HOME')) ?? ''
+    const shown = home !== '' && best.startsWith(`${home}/`) ? `~${best.slice(home.length)}` : best
+    // A command hook holds the box; the proposal shows once it has returned.
+    $.clock.after(0, () => void $.prompt.suggest({ text: `/${command} ${shown}${fn === undefined ? '' : `#${fn}`}` }))
+  }
+  return { text: missing.error }
 }
 
 async function openBox($: EngineInterface, n: number): Promise<void> {
@@ -148,6 +188,11 @@ async function handleSkeleton($: EngineInterface, input: Record<string, unknown>
   const tools = await read($, toolsAtom)
   const target = await targetOf($, typeof input.target === 'string' ? input.target : '')
   const [file = '', fn] = target.split('#')
+  const missing = await missingTarget($, file)
+  if (missing !== null) {
+    await failWaiting($, target, missing.error)
+    return { isError: true as const, result: missing.error, text: missing.error }
+  }
   const extracted = await skeletonOf(hostOf($), ctxOf(meta, tools), file)
   if (isFailure(extracted)) {
     await failWaiting($, target, extracted.error)
@@ -196,6 +241,59 @@ async function pollDot($: EngineInterface): Promise<void> {
 }
 
 /**
+ * Finds the tools and writes this session's tools and meta: session.start's job, and the first use's after a /clear.
+ * @param {EngineInterface} $ the engine handed to a hook
+ * @param {PluginOptions} options the plugin options
+ * @param {string} cwd the session's directory
+ * @returns {Promise<void>} once both atoms are written
+ */
+async function setup($: EngineInterface, options: PluginOptions, cwd: string): Promise<void> {
+  const host = hostOf($)
+  const home = (await $.env.get('HOME')) ?? ''
+  const cacheDir = `${(await $.env.get('XDG_CACHE_HOME')) || `${home}/.cache`}/graph-in-pane`
+  const [{ tools, parserDirs }, osRelease, hasBrew] = await Promise.all([
+    resolveTools(host, options).then(async tools => ({
+      tools,
+      parserDirs: tools['ast-grep'] === undefined ? await nvimParserDirs(host, tools, options) : [],
+    })),
+    host.read('/etc/os-release').catch(() => ''),
+    host
+      .run(['sh', '-c', 'command -v brew'], { stdin: '' })
+      .catch(() => ({ exitCode: 1 }))
+      .then(result => result.exitCode === 0),
+  ])
+  const hints: Hints = { dot: installHint(osRelease, hasBrew, 'dot'), astGrep: installHint(osRelease, hasBrew, 'ast-grep') }
+  await update($, toolsAtom, () => tools)
+  await update($, metaAtom, meta => ({
+    cwd,
+    sessionTag: String(Date.now()),
+    cacheDir,
+    gen: meta?.gen ?? 0,
+    parserDirs,
+    hints,
+  }))
+}
+
+/** The typeahead rows for a path-taking command's argument: fuzzy matches under the dir the token names. */
+async function pickRows($: EngineInterface, token: string): Promise<PromptAutocompleteSuggestion[]> {
+  const meta = await read($, metaAtom)
+  const tools = await read($, toolsAtom)
+  const host = hostOf($)
+  const picked = await pickRoot(host, token, meta.cwd, (await $.env.get('HOME')) ?? '')
+  if (picked === null) return []
+  const ranked = await rank(host, tools.fzf, await cachedCandidates(host, picked.root), picked.query)
+  return ranked.map(path => ({
+    text: `${picked.prefix}${path}`,
+    description: path.endsWith('/') ? 'dir' : (langOf(path) ?? (path.endsWith('.dot') ? 'dot' : 'script')),
+  }))
+}
+
+/** Sets the session up unless done: a /clear starts one with fresh state and no session.start. */
+async function ready($: EngineInterface, options: PluginOptions): Promise<void> {
+  if ((await read($, metaAtom)).sessionTag === EMPTY_META.sessionTag) await setup($, options, await $.session.cwd())
+}
+
+/**
  * The mod's hooks module: session start, the /graph commands, the show_graph and graph_skeleton tools, and plan tracking.
  * @param {Parameters<Register>[0]} on registers a hook for an event
  * @param {Parameters<Register>[1]} options the plugin options
@@ -203,30 +301,8 @@ async function pollDot($: EngineInterface): Promise<void> {
  */
 export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
-    const host = hostOf($)
-    const home = (await $.env.get('HOME')) ?? ''
-    const cacheDir = `${(await $.env.get('XDG_CACHE_HOME')) || `${home}/.cache`}/graph-in-pane`
-    const [{ tools, parserDirs }, osRelease, hasBrew] = await Promise.all([
-      resolveTools(host, options).then(async tools => ({
-        tools,
-        parserDirs: tools['ast-grep'] === undefined ? await nvimParserDirs(host, tools, options) : [],
-      })),
-      host.read('/etc/os-release').catch(() => ''),
-      host
-        .run(['sh', '-c', 'command -v brew'], { stdin: '' })
-        .catch(() => ({ exitCode: 1 }))
-        .then(result => result.exitCode === 0),
-    ])
-    const hints: Hints = { dot: installHint(osRelease, hasBrew, 'dot'), astGrep: installHint(osRelease, hasBrew, 'ast-grep') }
-    await update($, toolsAtom, () => tools)
-    await update($, metaAtom, meta => ({
-      cwd: e.cwd,
-      sessionTag: String(Date.now()),
-      cacheDir,
-      gen: meta?.gen ?? 0,
-      parserDirs,
-      hints,
-    }))
+    await setup($, options, e.cwd)
+    const { cacheDir } = await read($, metaAtom)
     // Pngs from sessions over a day old.
     void $.process.run(['find', cacheDir, '-name', '*.png', '-mtime', '+1', '-delete'], { stdin: '' }).catch(() => undefined)
     await $.command.register({ name: 'graph-tree', description: 'Graph a file or dir literally in the graph pane', argumentHint: '<file|dir>' })
@@ -249,15 +325,22 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  on('command.run', { command: 'graph-tree' }, async ($, e) => treeCommand($, e.args))
-  on('command.run', { command: '10kfv' }, async ($, e) => treeCommand($, e.args))
+  on('command.run', { command: 'graph-tree' }, async ($, e) => (await ready($, options), treeCommand($, 'graph-tree', e.args)))
+  on('command.run', { command: '10kfv' }, async ($, e) => (await ready($, options), treeCommand($, '10kfv', e.args)))
 
-  on('command.run', { command: 'graph-flow' }, async ($, e) => flowCommand($, e.args))
-  on('command.run', { command: '10kfo' }, async ($, e) => flowCommand($, e.args))
+  on('command.run', { command: 'graph-flow' }, async ($, e) => (await ready($, options), flowCommand($, 'graph-flow', e.args)))
+  on('command.run', { command: '10kfo' }, async ($, e) => (await ready($, options), flowCommand($, '10kfo', e.args)))
 
-  on('tool.call', { tool: 'mcp__graph-in-pane__graph_skeleton' }, async ($, e) => handleSkeleton($, e as Record<string, unknown>))
+  on('tool.call', { tool: 'mcp__graph-in-pane__graph_skeleton' }, async ($, e) => (await ready($, options), handleSkeleton($, e as Record<string, unknown>)))
 
-  on('tool.call', { tool: 'mcp__graph-in-pane__show_graph' }, async ($, e) => handleShowGraph($, e as Record<string, unknown>))
+  on('tool.call', { tool: 'mcp__graph-in-pane__show_graph' }, async ($, e) => (await ready($, options), handleShowGraph($, e as Record<string, unknown>)))
+
+  on('prompt.autocomplete', async ($, e, next) => {
+    if (!isPickToken(e.text, e.start)) return next(e)
+    await ready($, options)
+    const rows = await pickRows($, e.token)
+    return { suggestions: [...(await next(e)).suggestions, ...rows] }
+  })
 
   on('command.run', { command: 'graph' }, async ($, e) => {
     if (e.args.trim() === 'off') {

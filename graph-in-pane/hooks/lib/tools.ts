@@ -5,7 +5,7 @@ import type { Host } from './host'
 
 export type { ToolName, Tools }
 
-const TOOL_NAMES: readonly ToolName[] = ['dot', 'ast-grep', 'tree-sitter', 'nvim', 'unflatten']
+const TOOL_NAMES: readonly ToolName[] = ['dot', 'ast-grep', 'tree-sitter', 'nvim', 'unflatten', 'fzf']
 
 const OPTION_OF: Readonly<Partial<Record<ToolName, string>>> = {
   dot: 'dotPath',
@@ -14,7 +14,7 @@ const OPTION_OF: Readonly<Partial<Record<ToolName, string>>> = {
 }
 
 /**
- * Where user-installed binaries live on common distros, after PATH.
+ * Where binaries live on common distros, after PATH: user installs, then distro packages (a PATH the hook does not see).
  * @param {string} home the user's home dir
  * @returns {readonly string[]} dirs to look in, in order
  */
@@ -23,6 +23,8 @@ export const candidateDirs = (home: string): readonly string[] => [
   `${home}/.linuxbrew/bin`,
   `${home}/.cargo/bin`,
   `${home}/.local/bin`,
+  '/usr/local/bin',
+  '/usr/bin',
 ]
 
 const firstMatch = async <T>(
@@ -87,28 +89,34 @@ const familyOf = (osRelease: string): Family => {
 }
 
 const PORTABLE_AST_GREP = 'cargo install ast-grep  or  npm i -g @ast-grep/cli'
+const PORTABLE_TREE_SITTER = 'cargo install tree-sitter-cli  or  npm i -g tree-sitter-cli'
 
-const HINTS: Readonly<Record<Family, (hasBrew: boolean) => Readonly<Record<'dot' | 'ast-grep', string>>>> = {
-  arch: () => ({ dot: 'pacman -S graphviz', 'ast-grep': 'pacman -S ast-grep' }),
+const HINTS: Readonly<Record<Family, (hasBrew: boolean) => Readonly<Record<'dot' | 'ast-grep' | 'tree-sitter', string>>>> = {
+  arch: () => ({ dot: 'pacman -S graphviz', 'ast-grep': 'pacman -S ast-grep', 'tree-sitter': 'pacman -S tree-sitter-cli' }),
   fedora: hasBrew =>
     hasBrew
-      ? { dot: 'brew install graphviz', 'ast-grep': 'brew install ast-grep' }
-      : { dot: 'sudo dnf install graphviz', 'ast-grep': 'cargo install ast-grep' },
-  debian: () => ({ dot: 'sudo apt install graphviz', 'ast-grep': PORTABLE_AST_GREP }),
+      ? { dot: 'brew install graphviz', 'ast-grep': 'brew install ast-grep', 'tree-sitter': PORTABLE_TREE_SITTER }
+      : { dot: 'sudo dnf install graphviz', 'ast-grep': 'cargo install ast-grep', 'tree-sitter': PORTABLE_TREE_SITTER },
+  debian: () => ({ dot: 'sudo apt install graphviz', 'ast-grep': PORTABLE_AST_GREP, 'tree-sitter': PORTABLE_TREE_SITTER }),
   other: hasBrew =>
     hasBrew
-      ? { dot: 'brew install graphviz', 'ast-grep': 'brew install ast-grep' }
-      : { dot: 'install graphviz with your package manager', 'ast-grep': PORTABLE_AST_GREP },
+      ? { dot: 'brew install graphviz', 'ast-grep': 'brew install ast-grep', 'tree-sitter': PORTABLE_TREE_SITTER }
+      : { dot: 'install graphviz with your package manager', 'ast-grep': PORTABLE_AST_GREP, 'tree-sitter': PORTABLE_TREE_SITTER },
 }
 
 /**
  * The install line for a missing tool on the distro /etc/os-release describes.
+ * ast-grep's names the tree-sitter CLI too: it is shown only when that is missing as well.
  * @param {string} osRelease the text of /etc/os-release
  * @param {boolean} hasBrew whether Homebrew is installed
  * @param {ToolName} missing the tool that was not found
  * @returns {string} the message to show
  */
-export const installHint = (osRelease: string, hasBrew: boolean, missing: ToolName): string =>
-  missing === 'dot' || missing === 'ast-grep'
-    ? `${missing} not found. Install: ${HINTS[familyOf(osRelease)](hasBrew)[missing]}`
-    : `${missing} not found (optional).`
+export const installHint = (osRelease: string, hasBrew: boolean, missing: ToolName): string => {
+  const hints = HINTS[familyOf(osRelease)](hasBrew)
+  return missing === 'ast-grep'
+    ? `ast-grep not found. Install: ${hints['ast-grep']}  (or ${hints['tree-sitter']} to parse with nvim's tree-sitter parsers)`
+    : missing === 'dot'
+      ? `dot not found. Install: ${hints.dot}`
+      : `${missing} not found (optional).`
+}
