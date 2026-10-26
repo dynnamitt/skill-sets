@@ -48,9 +48,11 @@ Script paths are relative to this skill's directory.
 scripts/dotcat flow.gv              # sized to this pane, TB/LR chosen automatically
 scripts/dotcat --dir LR flow.gv     # force a direction
 some-tool --dot | scripts/dotcat    # from stdin
+scripts/dotcat -w flow.gv           # full-window view; re-fits on resize, q leaves it
 ```
 
-`dotcat` renders at the pane's pixel size with graph text as tall as terminal text, and on a
+`dotcat` prints a `Title (LR)` header line (graph `label`, else file name) and renders under it
+at the pane's pixel size with graph text as tall as terminal text, and on a
 dark terminal background re-colours the graph to blend in (`--theme dark|light` to force) —
 keep `.dot` sources neutral and let the theme happen at render time. Outside a graphics
 terminal it writes `graph.png` and prints the path. Doing it by hand, feed `icat` the PNG on
@@ -83,10 +85,12 @@ For a state or progress diagram that updates while a script runs:
    the old one (`\e_Ga=d,d=I,i=<old>,q=2\e\\`), inside a synchronized update
    (`\e[?2026h` … `\e[?2026l`). `icat --clear` or re-using one id blanks a frame.
 4. **Own the screen**: alt screen, hidden cursor, `--place` at a fixed cell, step output to a
-   log file — anything printed scrolls the frame. Re-measure on `SIGWINCH`.
+   log file — anything printed scrolls the frame. On `SIGWINCH`, wait until the size holds
+   still, then lay out again for the new pane shape and redraw.
 
 `scripts/dotlive.sh` is a bash library doing all of it (states pending/running/done/failed/
-skipped; parallel jobs supported via state files and a poller) →
+skipped; parallel jobs supported via state files and an always-on poller, which also redraws
+on resize while a step blocks) →
 [references/live-updates.md](references/live-updates.md)
 
 ```bash
