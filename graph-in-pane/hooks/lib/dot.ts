@@ -26,10 +26,19 @@ export const STYLE = [
   `  edge [color="${COLORS.edge}" fontcolor="${COLORS.edgeText}" fontname="sans" fontsize=9]`,
 ].join('\n')
 
-/** Inserts STYLE right after the graph's opening brace. */
+const GRAPH_HEADER = /^\s*(?:strict\s+)?(?:di)?graph\s*(?:"(?:[^"\\]|\\.)*"|[^\s{]*)\s*\{/i
+
+/**
+ * Inserts STYLE right after the graph's opening brace, skipping any brace inside a quoted name.
+ * Falls back to the first brace when the header does not match; leaves the text alone when there is no brace.
+ *
+ * @param {string} dot - The DOT source of one graph.
+ * @returns {string} The DOT source with STYLE inserted after the opening brace.
+ */
 export const styleDot = (dot: string): string => {
-  const brace = dot.indexOf('{')
-  return brace < 0 ? dot : `${dot.slice(0, brace + 1)}\n${STYLE}\n${dot.slice(brace + 1)}`
+  const header = GRAPH_HEADER.exec(dot)
+  const at = header ? header[0].length : dot.indexOf('{') + 1
+  return at === 0 ? dot : `${dot.slice(0, at)}\n${STYLE}\n${dot.slice(at)}`
 }
 
 const MAX_EXTERNALS = 12

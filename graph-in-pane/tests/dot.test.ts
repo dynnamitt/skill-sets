@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { altOutline, fitBox, pngPath, styleDot, treeGraph } from '../hooks/lib/dot'
+import { altOutline, fitBox, pngPath, STYLE, styleDot, treeGraph } from '../hooks/lib/dot'
 import { renderPng } from '../hooks/lib/render'
 import { type FileSkeleton, fileSkeleton, toRows } from '../hooks/lib/skeleton'
 import { ROWS as PAIR } from './fixtures/pair.rows'
@@ -15,6 +15,10 @@ test('styleDot puts the shared style before the graph body', async () => {
   expect(dot).toContain('rankdir=TB')
   expect(dot).toContain('bgcolor="#1e1e2e"')
   expect(dot.indexOf('rankdir')).toBeLessThan(dot.indexOf('a -> b'))
+})
+
+test('styleDot skips a brace inside a quoted graph name', async () => {
+  expect(styleDot('digraph "a{b" { x }').startsWith(`digraph "a{b" {\n${STYLE}`)).toBe(true)
 })
 
 test('exits are ovals: green for 0, red otherwise', async () => {
