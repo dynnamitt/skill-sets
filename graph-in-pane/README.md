@@ -19,6 +19,14 @@ fewer terminal splits.
 | `/graph-flow <file\|dir>` | `/10kfo` (overview) | A 10,000 ft flow that Claude draws from the tree-sitter skeleton: phases, failure exits, every arrow backed by the code. |
 | `/graph` | | Reopens the pane, showing the latest plan graph first. `/graph off` stops plan graphs. |
 
+**Picking the path**
+
+While you type the argument of `/graph-tree`, `/graph-flow` or their aliases,
+the typeahead offers fuzzy-matched files and dirs. `src/data/vehimp` or
+`~/entur/hat/veh` look under the longest dir the token names; the rest is
+matched with `fzf --filter` when fzf is installed, else a built-in matcher.
+Paths come from `git ls-files` in a repo, else a 4-level walk.
+
 **In the pane**
 - Press ctrl+x tab to focus the pane.
 - Digits `1`–`9` open a numbered box: an own file, or a large function.
@@ -45,6 +53,7 @@ path can also be set in the plugin's options (`/config`).
 | Graphviz `dot` | every graph | `pacman -S graphviz` | `brew install graphviz` (or `dnf install graphviz`) | `apt install graphviz` |
 | `ast-grep` | `/graph-tree`, `/graph-flow` | `pacman -S ast-grep` | `brew install ast-grep` | `cargo install ast-grep` or `npm i -g @ast-grep/cli` |
 | `tree-sitter` CLI + Neovim parsers | fallback when ast-grep is missing | `pacman -S tree-sitter-cli` | in the base image | `cargo install tree-sitter-cli` |
+| `fzf` (optional) | fzf ranking in the path typeahead | `pacman -S fzf` | `brew install fzf` (or `dnf install fzf`) | `apt install fzf` |
 
 Notes:
 - Run `ast-grep` by its full name. `sg` is a shadow-utils command on most

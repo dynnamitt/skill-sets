@@ -37,6 +37,10 @@ export type World = {
   runs: string[][]
   /** Runs once inside the next dot run, then clears itself. */
   beforeDot: (() => Promise<void>) | null
+  /** What `git ls-files` prints; null fails it, as outside a repo. */
+  gitFiles: string | null
+  /** Texts proposed as the prompt box's dim suggestion. */
+  suggested: string[]
 }
 
 /** Answers every host call the plugin makes from memory: files, ast-grep, dot, state, ui. */
@@ -44,7 +48,7 @@ export const world = (on: On, files: Record<string, FakeFile>): World => {
   const clock = mock.clock(on, { now: 1000 })
   const w: World = {
     files, dotInputs: [], dotFails: null, state: {}, writes: [], submitted: [], status: [], placed: true, clock,
-    denied: [], noDot: false, dotRejects: false, noPng: false, runs: [], beforeDot: null,
+    denied: [], noDot: false, dotRejects: false, noPng: false, runs: [], beforeDot: null, gitFiles: null, suggested: [],
   }
   mock.env(on, { HOME: '/h' })
   on('fs.exists', (_, e) => ({ value: e.path in w.files }))
@@ -81,6 +85,7 @@ export const world = (on: On, files: Record<string, FakeFile>): World => {
       if (file.endsWith('big.sh')) return { value: { exitCode: 0, stdout: '{"ruleId":"fn","text":"a() {', stderr: '', isStdoutTruncated: true, isStderrTruncated: false } }
       return ok(file.endsWith('pair.sh') ? PAIR.map(row => JSON.stringify(row)).join('\n') : '')
     }
+    if (cmd === 'git') return w.gitFiles === null ? ok('', 128) : ok(w.gitFiles)
     if (cmd === '/bin/unflatten') return ok(`${e.init?.stdin ?? ''}\n// unflattened`)
     if (cmd === '/bin/dot') {
       const before = w.beforeDot
@@ -113,6 +118,12 @@ export const world = (on: On, files: Record<string, FakeFile>): World => {
   })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: '/fx' }))
+  on('prompt.suggest', (_, e) => {
+    w.suggested.push(e.text)
+    return { isShown: true }
+  })
+  // Core adds no rows of its own.
+  on('prompt.autocomplete', () => ({ suggestions: [] }))
   return w
 }
 

@@ -1,4 +1,4 @@
-export type ToolName = 'dot' | 'ast-grep' | 'tree-sitter' | 'nvim' | 'unflatten'
+export type ToolName = 'dot' | 'ast-grep' | 'tree-sitter' | 'nvim' | 'unflatten' | 'fzf'
 /** Absolute paths of the host tools that were found. */
 export type Tools = Readonly<Partial<Record<ToolName, string>>>
 
