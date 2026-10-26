@@ -1,6 +1,6 @@
 {
   "name": "graph-in-pane",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Graphviz graphs of scripts, builds and plans in a docked pane",
   "author": {
     "name": "dynnamitt"
