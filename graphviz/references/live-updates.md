@@ -117,7 +117,7 @@ live_stop
 
 A drag sends a burst of `SIGWINCH`. Redrawing on each one wastes layouts on sizes that last
 milliseconds, so the trap only sets a flag; the drawer then waits until the size has held
-for `FIT_RESIZE_SETTLE_S` (1 s), showing an ASCII bar on the header row (`pipeline (LR)
+for `FIT_RESIZE_SETTLE_S` (0.2 s), showing an ASCII bar on the header row (`pipeline (LR)
 [####------]`) that each new signal resets. The old frame stays up meanwhile, and state
 changes are held back — rendering into a window that is still changing is wasted.
 

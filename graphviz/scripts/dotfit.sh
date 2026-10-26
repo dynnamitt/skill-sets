@@ -15,8 +15,8 @@ FIT_QUERY_TIMEOUT=1               # seconds per reply character from the colour 
 FIT_DARK_LUMA=128                 # background luma (0-255, Rec. 601) below this counts as dark
 FIT_THEME=${FIT_THEME:-auto}      # auto (follow the terminal background) | dark | light
 FIT_HEADER_ROWS=1                 # "Title (LR)" row above the image
-FIT_RESIZE_SETTLE_S=1             # redraw once the window size has held this long
-FIT_BAR_COLS=10 FIT_BAR_TICK_S=0.1   # settle bar on the header row: width, tick
+FIT_RESIZE_SETTLE_S=0.2           # redraw once the window size has held this long
+FIT_BAR_COLS=10                   # settle bar on the header row; one cell per tick
 FIT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 FIT_RESIZED=                      # callers' WINCH trap sets it; fit_settle clears it
 
@@ -121,14 +121,14 @@ fit_header() {
 # header row (row 1) that fills over that time; each new WINCH (FIT_RESIZED) restarts it.
 # The old frame stays on screen meanwhile. Call fit_measure afterwards.
 fit_settle() {
-  local steps i=0
-  steps=$(awk -v s="$FIT_RESIZE_SETTLE_S" -v t="$FIT_BAR_TICK_S" 'BEGIN { printf "%d", s / t + 0.5 }')
+  local steps=$FIT_BAR_COLS i=0 tick
+  tick=$(awk -v s="$FIT_RESIZE_SETTLE_S" -v n="$steps" 'BEGIN { printf "%.3f", s / n }')
   while :; do
     if [ -n "$FIT_RESIZED" ]; then FIT_RESIZED= i=0; fi
     fit_cols
     printf '\e[1;1H'; fit_header "$(fit__bar "$i" "$steps")"
     (( i >= steps )) && [ -z "$FIT_RESIZED" ] && return 0
-    sleep "$FIT_BAR_TICK_S"
+    sleep "$tick"
     (( i < steps )) && i=$(( i + 1 ))
   done
 }

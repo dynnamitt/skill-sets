@@ -11,7 +11,7 @@
 #   --theme T   auto (default: re-colour on a dark terminal background), dark, light
 #   -K engine   dot (default), neato, fdp, sfdp, circo, twopi; --dir only affects dot
 #   -w, --watch full-window view that re-lays out and redraws when the window is resized
-#               (after it holds still for a second); q, Esc or Ctrl-C leaves it and
+#               (once it holds still for 0.2s); q, Esc or Ctrl-C leaves it and
 #               reprints the last frame inline
 #   -o FILE     keep the PNG. Outside a graphics terminal the PNG is always written
 #               (to ./graph.png without -o) and its path printed.
