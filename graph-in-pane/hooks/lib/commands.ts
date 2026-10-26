@@ -1,10 +1,11 @@
 import type { Hints, Tools, View } from '../../types'
 import { altOutline, pngPath, treeGraph } from './dot'
-import { extractTarget, isFailure } from './extract'
+import { extractTarget, type Failure, isFailure, langOfFile, listSourceFiles, noGrammar } from './extract'
 import { type Host, safely } from './host'
 import { emptyView } from './nav'
 import { base, normalize } from './path'
 import { renderPng, type RenderOptions } from './render'
+import type { Skeleton } from './skeleton'
 
 /** What rendering needs from the session: tools, where pngs go, the fallback parsers. */
 export type RenderCtx = { tools: Tools; cacheDir: string; sessionTag: string; parserDirs: readonly string[]; hints: Hints }
@@ -36,6 +37,35 @@ export const renderView = async (
     : { ...view, error: rendered.error, waiting: false }
 }
 
+/**
+ * Stats a file or dir and extracts its skeleton: the one path behind the tree view and graph_skeleton.
+ * @param {Host} host the session host
+ * @param {RenderCtx} ctx tools, parser dirs and hints
+ * @param {string} file absolute path of a file or dir
+ * @returns {Promise<{ sk: Skeleton; isDir: boolean } | Failure>} the skeleton, else why not
+ */
+export const skeletonOf = async (host: Host, ctx: RenderCtx, file: string): Promise<{ sk: Skeleton; isDir: boolean } | Failure> => {
+  const stat = await host.stat(file)
+  if (stat === null) return { error: `not found: ${file}` }
+  const isDir = stat.kind === 'dir'
+  const sk = await extractTarget(host, ctx.tools, file, isDir, ctx.parserDirs, ctx.hints.astGrep)
+  return isFailure(sk) ? sk : { sk, isDir }
+}
+
+/**
+ * The cheap check behind /graph-flow: the target exists and has something to extract. Runs no ast-grep.
+ * @param {Host} host the session host
+ * @param {string} file absolute path of a file or dir
+ * @returns {Promise<{ files: number } | Failure>} how many source files, else why not
+ */
+export const flowCheck = async (host: Host, file: string): Promise<{ files: number } | Failure> => {
+  const stat = await host.stat(file)
+  if (stat === null) return { error: `not found: ${file}` }
+  if (stat.kind !== 'dir') return (await langOfFile(host, file)) === null ? { error: noGrammar(file) } : { files: 1 }
+  const { files } = await listSourceFiles(host, file)
+  return files.length === 0 ? { error: `no bash, TypeScript or JavaScript files under ${file}` } : { files: files.length }
+}
+
 /** The literal view of a file, dir, `${file}#${fn}` or .dot file; failures land on the view, never thrown. */
 export const treeView = async (host: Host, ctx: RenderCtx, target: string, gen: number): Promise<View> => {
   const [file = target] = target.split('#')
@@ -48,9 +78,9 @@ export const treeView = async (host: Host, ctx: RenderCtx, target: string, gen: 
         if (stat.kind !== 'file') return { ...view, error: `not a file: ${file}` }
         return renderView(host, ctx, { ...view, mtimeMs: stat.mtimeMs }, await host.read(file), gen)
       }
-      const sk = await extractTarget(host, ctx.tools, file, stat.kind === 'dir', ctx.parserDirs, ctx.hints.astGrep)
-      if (isFailure(sk)) return { ...view, error: sk.error }
-      const graph = treeGraph(sk, target.includes('#') ? target : file)
+      const extracted = await skeletonOf(host, ctx, file)
+      if (isFailure(extracted)) return { ...view, error: extracted.error }
+      const graph = treeGraph(extracted.sk, target.includes('#') ? target : file)
       return renderView(host, ctx, { ...view, openable: graph.openable }, graph.dot, gen, { unflatten: true })
     },
     error => ({ ...view, error }),

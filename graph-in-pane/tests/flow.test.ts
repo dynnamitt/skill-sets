@@ -83,6 +83,13 @@ test('a plan graph does not replace a tree being browsed', async ($, on) => {
   expect(w.status).toContain('plan graph updated · /graph')
 })
 
+test('/graph-flow runs no ast-grep itself; only graph_skeleton does', async ($, on) => {
+  const w = world(on, FILES)
+  await start($)
+  await runCommand($, 'graph-flow', 'pair.sh')
+  expect(w.runs.filter(argv => argv[0] === '/bin/ast-grep')).toEqual([])
+})
+
 test('/10kfo sends the skeleton to Claude and waits; the answer replaces the wait', async ($, on) => {
   const w = world(on, FILES)
   await start($)

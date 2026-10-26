@@ -2,9 +2,9 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Hints, Meta, Nav, PlanState, View } from '../types'
-import { redrawDot, type RenderCtx, renderView, resolveTarget, summary, treeView } from './lib/commands'
+import { flowCheck, redrawDot, type RenderCtx, renderView, resolveTarget, skeletonOf, summary, treeView } from './lib/commands'
 import { styleDot } from './lib/dot'
-import { extractTarget, isFailure } from './lib/extract'
+import { isFailure } from './lib/extract'
 import { nvimParserDirs } from './lib/fallback'
 import {
   flowRequest,
@@ -91,23 +91,17 @@ async function treeTarget($: EngineInterface, target: string): Promise<{ text: s
 
 /** Extracts a target's skeleton, shows a waiting view and asks Claude for its flow graph. */
 async function flowAsk($: EngineInterface, target: string, how: 'reset' | 'push'): Promise<{ text: string }> {
-  const { ctx } = await renderCtx($)
-  const host = hostOf($)
   const [file = target] = target.split('#')
-  const stat = await host.stat(file)
-  const sk =
-    stat === null
-      ? { error: `not found: ${file}` }
-      : await extractTarget(host, ctx.tools, file, stat.kind === 'dir', ctx.parserDirs, ctx.hints.astGrep)
-  if (isFailure(sk)) {
-    const view = { ...emptyView('flow', file, target), error: sk.error }
+  const checked = await flowCheck(hostOf($), file)
+  if (isFailure(checked)) {
+    const view = { ...emptyView('flow', file, target), error: checked.error }
     await showView($, view, (await read($, navAtom)).stack.length > 0 ? 'push' : how)
     return { text: summary(view) }
   }
   await showView($, waitingView(target), how)
   // A command hook holds the turn; the submit runs once it has returned.
   $.clock.after(0, () => void $.prompt.submit({ text: flowRequest(target) }))
-  return { text: flowSummary(sk, target) }
+  return { text: flowSummary(target, checked.files) }
 }
 
 async function flowCommand($: EngineInterface, args: string): Promise<{ text: string }> {
@@ -145,17 +139,12 @@ async function handleSkeleton($: EngineInterface, input: Record<string, unknown>
   const tools = await read($, toolsAtom)
   const target = await targetOf($, typeof input.target === 'string' ? input.target : '')
   const [file = '', fn] = target.split('#')
-  const host = hostOf($)
-  const stat = await host.stat(file)
-  const isDir = stat?.kind === 'dir'
-  const sk =
-    stat === null
-      ? { error: `not found: ${file}` }
-      : await extractTarget(host, tools, file, isDir, meta.parserDirs, (meta.hints ?? EMPTY_HINTS).astGrep)
-  if (isFailure(sk)) {
-    await failWaiting($, target, sk.error)
-    return { isError: true as const, result: sk.error, text: sk.error }
+  const extracted = await skeletonOf(hostOf($), ctxOf(meta, tools), file)
+  if (isFailure(extracted)) {
+    await failWaiting($, target, extracted.error)
+    return { isError: true as const, result: extracted.error, text: extracted.error }
   }
+  const { sk, isDir } = extracted
   // A file#fn target answers that function alone; a dir answers one line per file.
   const answer = fn !== undefined && fn !== '' ? narrow(sk, file, fn) : isDir ? summarize(sk) : sk
   return { result: JSON.stringify(answer) }
