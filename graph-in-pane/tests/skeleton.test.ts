@@ -73,12 +73,12 @@ test('languages come from a shebang', async () => {
 
 const entry = (name: string, kind: 'file' | 'dir') => ({ name, kind, size: 1, mtimeMs: 0, isLink: false })
 
-const treeHost = (tree: Record<string, ReturnType<typeof entry>[]>, files: readonly string[] = []): Host => ({
+const treeHost = (tree: Record<string, ReturnType<typeof entry>[]>, files: readonly string[] = [], texts: Readonly<Record<string, string>> = {}): Host => ({
   run: async () => ({ exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }),
   exists: async path => files.includes(path),
   env: async () => undefined,
   list: async dir => tree[dir] ?? [],
-  read: async () => '',
+  read: async path => texts[path] ?? '',
   bytes: async () => '',
   stat: async path =>
     files.includes(path) ? { kind: 'file', mtimeMs: 0 } : path in tree ? { kind: 'dir', mtimeMs: 0 } : null,
@@ -95,6 +95,18 @@ test('a big dir skips ignored folders and caps at 200 files', async () => {
   expect(files.length).toBe(200)
   expect(omitted).toBe(51)
   expect(files.filter(f => f.path.includes('node_modules'))).toEqual([])
+})
+
+test('a dir walk lists extension-less shebang scripts and skips plain files', async () => {
+  const host = treeHost(
+    { '/p': [entry('LICENSE', 'file'), entry('deploy', 'file'), entry('a.ts', 'file')] },
+    [],
+    { '/p/deploy': '#!/usr/bin/env bash\necho hi\n', '/p/LICENSE': 'MIT\n' },
+  )
+  expect((await listSourceFiles(host, '/p')).files).toEqual([
+    { path: '/p/a.ts', lang: 'typescript' },
+    { path: '/p/deploy', lang: 'bash' },
+  ])
 })
 
 test('relative specs resolve to existing own files with extensions', async () => {
