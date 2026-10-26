@@ -27,7 +27,7 @@ Each skill lives in its own directory:
 - `xbox-bluetooth-linux/` — Xbox controller Bluetooth (BLE) on Linux: triage, btmon, adapters, pairing workaround (+ `scripts/`)
 
 **Plugins (mods):** listed in `.claude-plugin/marketplace.json` at the repo root.
-- `graph-in-pane/` — Graphviz graphs of scripts, builds, `.dot` files and plans in a docked pane
+- (none currently)
 
 A plugin folder:
 
