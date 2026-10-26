@@ -4,10 +4,5 @@
     "name": "dynnamitt"
   },
   "description": "Claude Code plugins from dynnamitt/skill-sets",
-  "plugins": [
-    {
-      "name": "graph-in-pane",
-      "source": "./graph-in-pane"
-    }
-  ]
+  "plugins": []
 }

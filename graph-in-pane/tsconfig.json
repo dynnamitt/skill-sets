@@ -1,4 +1,0 @@
-{
-  "extends": "./.claude-plugin/types/tsconfig.json",
-  "exclude": ["tests/fixtures/vite"]
-}
