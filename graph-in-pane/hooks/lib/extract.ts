@@ -13,16 +13,21 @@ export const isFailure = (value: unknown): value is Failure =>
   typeof value === 'object' && value !== null && 'error' in value
 
 const SCRIPT_TRIES = ['', '.ts', '.tsx', '.mts', '.js', '.mjs', '.jsx', '/index.ts', '/index.tsx', '/index.js']
+// An ESM-style `.js` spec names a `.ts` source: try these stems first.
+const JS_TO_TS: Readonly<Record<string, string>> = { '.js': '.ts', '.jsx': '.tsx', '.mjs': '.mts' }
 
-/** Resolves a relative dependency spec to an existing own file, else null. */
+/** Resolves a relative dependency spec to an existing own file (never a dir), else null. */
 export const ownResolver =
   (host: Host) =>
   async (fromFile: string, spec: string): Promise<string | null> => {
     if (!spec.startsWith('./') && !spec.startsWith('../')) return null
     const base = normalize(`${dirOf(fromFile)}/${spec}`)
     if (base.split('/').includes('node_modules')) return null
-    const tries = langOf(fromFile) === 'bash' ? [''] : SCRIPT_TRIES
-    const found = await Promise.all(tries.map(async ext => ((await host.exists(base + ext)) ? base + ext : null)))
+    const jsExt = Object.keys(JS_TO_TS).find(ext => base.endsWith(ext))
+    const swapped = jsExt === undefined ? [] : [`${base.slice(0, -jsExt.length)}${JS_TO_TS[jsExt]}`]
+    const tries = langOf(fromFile) === 'bash' ? [base] : [...swapped, ...SCRIPT_TRIES.map(ext => base + ext)]
+    const isFile = async (path: string) => (await host.stat(path))?.kind === 'file'
+    const found = await Promise.all(tries.map(async path => ((await isFile(path)) ? path : null)))
     return found.find(path => path !== null) ?? null
   }
 

@@ -75,7 +75,8 @@ const treeHost = (tree: Record<string, ReturnType<typeof entry>[]>, files: reado
   list: async dir => tree[dir] ?? [],
   read: async () => '',
   bytes: async () => '',
-  stat: async () => null,
+  stat: async path =>
+    files.includes(path) ? { kind: 'file', mtimeMs: 0 } : path in tree ? { kind: 'dir', mtimeMs: 0 } : null,
 })
 
 test('a big dir skips ignored folders and caps at 200 files', async () => {
@@ -98,4 +99,11 @@ test('relative specs resolve to existing own files with extensions', async () =>
   expect(await resolve('/fx/vite/vite.config.ts', 'vite')).toBe(null)
   expect(await resolve('/fx/pair.sh', '$CONF')).toBe(null)
   expect(await resolve('/fx/a.ts', './node_modules/x')).toBe(null)
+})
+
+test('a dir import resolves to its index, and a .js spec to its .ts source', async () => {
+  const resolve = ownResolver(treeHost({ '/p/lib': [] }, ['/p/lib/index.ts', '/p/foo.ts', '/p/bar.js']))
+  expect(await resolve('/p/a.ts', './lib')).toBe('/p/lib/index.ts')
+  expect(await resolve('/p/a.ts', './foo.js')).toBe('/p/foo.ts')
+  expect(await resolve('/p/a.ts', './bar.js')).toBe('/p/bar.js')
 })
