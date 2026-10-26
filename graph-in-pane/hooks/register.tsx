@@ -60,6 +60,14 @@ async function showView($: EngineInterface, view: View, how: 'reset' | 'push' | 
   return { isPlaced: opened.isPlaced }
 }
 
+/** Like showView with replaceTop, but only if `was` is still the top view. */
+async function showReplacing($: EngineInterface, was: View, view: View): Promise<{ isPlaced: boolean }> {
+  await dispatch($, { type: 'replaceIf', was, view })
+  const opened = await $.ui.open({ id: PANE_ID, title: `Graph · ${view.title}` })
+  if (opened.isPlaced) $.ui.status(undefined)
+  return { isPlaced: opened.isPlaced }
+}
+
 /** The render context and a fresh generation number for the next png. */
 async function renderCtx($: EngineInterface): Promise<{ ctx: RenderCtx; gen: number; meta: Meta }> {
   await update($, metaAtom, meta => ({ ...(meta ?? EMPTY_META), gen: (meta ?? EMPTY_META).gen + 1 }))
@@ -116,7 +124,7 @@ async function openBox($: EngineInterface, n: number): Promise<void> {
   const box = top?.openable.find(o => o.n === n)
   if (top === undefined || box === undefined) return
   if (top.mode === 'flow') {
-    await flowAsk($, box.target, 'push')
+    await flowAsk($, await targetOf($, box.target), 'push')
     return
   }
   const { ctx, gen } = await renderCtx($)
@@ -131,7 +139,7 @@ function awaitsFlow(top: View | undefined, target: string): boolean {
 /** Replaces the waiting flow view for a target with the error that ended the wait. */
 async function failWaiting($: EngineInterface, target: string, error: string): Promise<void> {
   const top = topOf(await read($, navAtom))
-  if (top !== undefined && awaitsFlow(top, target)) await dispatch($, { type: 'replaceTop', view: { ...top, waiting: false, error } })
+  if (top !== undefined && awaitsFlow(top, target)) await dispatch($, { type: 'replaceIf', was: top, view: { ...top, waiting: false, error } })
 }
 
 /** Serves graph_skeleton: the tree-sitter skeleton of a file or dir, as JSON. */
@@ -160,7 +168,7 @@ async function handleShowGraph($: EngineInterface, input: Record<string, unknown
   const view = await renderView(hostOf($), ctx, base, styleDot(parsed.dot), gen)
   if (view.error !== null) {
     const text = `dot failed: ${view.error}`
-    if (parsed.kind === 'flow') await failWaiting($, parsed.target, view.error)
+    if (parsed.kind === 'flow') await failWaiting($, await targetOf($, parsed.target), view.error)
     return { isError: true as const, result: text, text }
   }
   const nav = await read($, navAtom)
@@ -172,8 +180,8 @@ async function handleShowGraph($: EngineInterface, input: Record<string, unknown
       return { result: RESULT.stored }
     }
   }
-  const how = parsed.kind === 'flow' && awaitsFlow(top, parsed.target) ? 'replaceTop' : 'reset'
-  const { isPlaced } = await showView($, view, how)
+  const isAwaited = parsed.kind === 'flow' && awaitsFlow(top, await targetOf($, parsed.target))
+  const { isPlaced } = await (isAwaited && top !== undefined ? showReplacing($, top, view) : showView($, view, 'reset'))
   if (!isPlaced) $.ui.status(RESULT.status)
   return { result: isPlaced ? RESULT.shown : RESULT.hidden }
 }
@@ -233,7 +241,7 @@ export const register: Register = (on, options) => {
     $.clock.every(DOT_POLL_MS, () => {
       if (isPolling) return
       isPolling = true
-      void pollDot($).finally(() => {
+      void pollDot($).catch(() => undefined).finally(() => {
         isPolling = false
       })
     })

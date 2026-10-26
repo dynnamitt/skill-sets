@@ -128,6 +128,18 @@ test('a flow whose DOT fails shows the error in place of the wait, and a retry r
   expect(nav(w).stack.map(v => [v.title, v.error])).toEqual([['good', null]])
 })
 
+test('a show_graph target Claude supplies is normalized before matching the wait', async ($, on) => {
+  const w = world(on, FILES)
+  await start($)
+  await runCommand($, 'graph-flow', 'pair.sh')
+  w.dotFails = { stderr: 'Error: syntax error\n' }
+  await show($, { kind: 'flow', title: 'bad', dot: 'digraph g { a -> }', target: '/fx/./pair.sh' })
+  expect(nav(w).stack.map(v => [v.waiting, v.error])).toEqual([[false, 'Error: syntax error']])
+  w.dotFails = null
+  await show($, { kind: 'flow', title: 'good', dot: 'digraph g { a -> b }', target: '/fx/./pair.sh' })
+  expect(nav(w).stack.map(v => [v.title, v.error])).toEqual([['good', null]])
+})
+
 test('a graph_skeleton failure for the awaited target shows in the pane', async ($, on) => {
   const w = world(on, { ...FILES })
   await start($)

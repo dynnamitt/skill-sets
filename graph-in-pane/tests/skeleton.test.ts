@@ -75,7 +75,7 @@ const entry = (name: string, kind: 'file' | 'dir', size = 1) => ({ name, kind, s
 
 const treeHost = (tree: Record<string, ReturnType<typeof entry>[]>, files: readonly string[] = [], texts: Readonly<Record<string, string>> = {}): Host => ({
   run: async () => ({ exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }),
-  exists: async path => files.includes(path),
+  exists: async path => files.includes(path) || path in tree,
   env: async () => undefined,
   list: async dir => tree[dir] ?? [],
   read: async path => texts[path] ?? '',
@@ -95,6 +95,10 @@ test('a big dir skips ignored folders and caps at 200 files', async () => {
   expect(files.length).toBe(200)
   expect(omitted).toBe(51)
   expect(files.filter(f => f.path.includes('node_modules'))).toEqual([])
+})
+
+test('mapLimit with a limit of 0 still maps every item', async () => {
+  expect(await mapLimit([1, 2, 3], 0, async n => n + 1)).toEqual([2, 3, 4])
 })
 
 test('the walk lists at most MAX_VISITED_DIRS dirs and says it was cut short', async () => {
