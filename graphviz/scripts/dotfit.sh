@@ -14,7 +14,11 @@ FIT_DETECT_TIMEOUT=1              # seconds for icat's graphics-support probe
 FIT_QUERY_TIMEOUT=1               # seconds per reply character from the colour query
 FIT_DARK_LUMA=128                 # background luma (0-255, Rec. 601) below this counts as dark
 FIT_THEME=${FIT_THEME:-auto}      # auto (follow the terminal background) | dark | light
+FIT_HEADER_ROWS=1                 # "Title (LR)" row above the image
+FIT_RESIZE_SETTLE_S=1             # redraw once the window size has held this long
+FIT_BAR_COLS=10 FIT_BAR_TICK_S=0.1   # settle bar on the header row: width, tick
 FIT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+FIT_RESIZED=                      # callers' WINCH trap sets it; fit_settle clears it
 
 # Succeed when stdout is a terminal that shows kitty-protocol images.
 #   @returns {status} 0 when images will show
@@ -63,21 +67,85 @@ fit_measure() {
 #                           sets; otherwise lays out TB and LR in parallel and keeps the one
 #                           that shrinks least (tie: wide pane → LR, tall pane → TB)
 #   @param {string} engine  layout engine (default dot); rankdir applies to dot only
-#   @returns {status} the engine's
+#   @returns {status} the engine's; sets FIT_ORIENT (TB | LR | BT | RL, or the engine name)
 fit_layout() {
   local in=$1 out=$2 dir=${3:-auto} engine=${4:-dot} tb lr st=0
-  if [ "$engine" != dot ] || { [ "$dir" = auto ] && grep -q rankdir "$in"; }; then
-    "$engine" -Tdot "$in" > "$out"; return
+  if [ "$engine" != dot ]; then FIT_ORIENT=$engine; "$engine" -Tdot "$in" > "$out"; return; fi
+  if [ "$dir" = auto ] && grep -q rankdir "$in"; then
+    dot -Tdot "$in" > "$out" || return
+    FIT_ORIENT=$(awk 'match($0, /rankdir="?[A-Za-z]+/) {
+      s = substr($0, RSTART + 8, RLENGTH - 8); gsub(/"/, "", s); print toupper(s); exit }' "$out")
+    FIT_ORIENT=${FIT_ORIENT:-TB}
+    return
   fi
-  if [ "$dir" != auto ]; then dot -Tdot -Grankdir="$dir" "$in" > "$out"; return; fi
+  if [ "$dir" != auto ]; then FIT_ORIENT=$dir; dot -Tdot -Grankdir="$dir" "$in" > "$out"; return; fi
   dot -Tdot -Grankdir=TB "$in" > "$out.TB" & tb=$!
   dot -Tdot -Grankdir=LR "$in" > "$out.LR" & lr=$!
   wait "$tb" || st=$?
   wait "$lr" || st=$?
   (( st == 0 )) || return "$st"
   dir=$(fit__pick "$out.TB" "$out.LR")
+  FIT_ORIENT=$dir
   mv -f "$out.$dir" "$out"
   rm -f "$out.TB" "$out.LR"
+}
+
+# Pick the header title: the root graph's label, else the file's basename, else the graph
+# id, else "stdin". HTML labels and anonymous graphs (gvpr names them %1) are skipped.
+#   @param {string} file  DOT file to read
+#   @param {string} name  what the user passed ("-" or empty for stdin)
+#   @returns sets FIT_TITLE
+fit_title() {
+  local id label
+  { IFS= read -r id; label=$(cat); } < <(gvpr 'BEG_G {
+      printf("%s\n%s\n", $G.name, hasAttr($G, "label") ? aget($G, "label") : ""); }' "$1" 2>/dev/null)
+  label=${label//\\[nlr]/ } label=${label//$'\n'/ }
+  [[ $label == '<'* ]] && label=
+  [[ $id == %* ]] && id=
+  FIT_TITLE=$label
+  [ -n "$FIT_TITLE" ] || { [ -n "${2:-}" ] && [ "$2" != - ] && FIT_TITLE=${2##*/}; }
+  FIT_TITLE=${FIT_TITLE:-${id:-stdin}}
+}
+
+# Header line, no newline and no positioning: bold title, dim (orientation), then an
+# optional bar. The title is cut first so orientation and bar always fit in FIT_COLS.
+#   @param {string} bar  text after the orientation (default none)
+fit_header() {
+  local tail=" (${FIT_ORIENT:-?})${1:+  $1}" cols=${FIT_COLS:-$FIT_DEFAULT_COLS} room
+  room=$(( cols - ${#tail} ))
+  (( room > 0 )) || room=0 tail=${tail:0:cols}
+  printf '\e[2K\e[1m%s\e[22m\e[2m%s\e[22m' "${FIT_TITLE:0:room}" "$tail"
+}
+
+# Wait until the window size has held for FIT_RESIZE_SETTLE_S, drawing an ASCII bar on the
+# header row (row 1) that fills over that time; each new WINCH (FIT_RESIZED) restarts it.
+# The old frame stays on screen meanwhile. Call fit_measure afterwards.
+fit_settle() {
+  local steps i=0
+  steps=$(awk -v s="$FIT_RESIZE_SETTLE_S" -v t="$FIT_BAR_TICK_S" 'BEGIN { printf "%d", s / t + 0.5 }')
+  while :; do
+    if [ -n "$FIT_RESIZED" ]; then FIT_RESIZED= i=0; fi
+    fit_cols
+    printf '\e[1;1H'; fit_header "$(fit__bar "$i" "$steps")"
+    (( i >= steps )) && [ -z "$FIT_RESIZED" ] && return 0
+    sleep "$FIT_BAR_TICK_S"
+    (( i < steps )) && i=$(( i + 1 ))
+  done
+}
+
+# Refresh FIT_COLS from the terminal (unchanged when there is no tty).
+fit_cols() {
+  local lines= cols=
+  read -r lines cols < <({ stty size </dev/tty; } 2>/dev/null) || :
+  (( ${cols:-0} > 0 )) && FIT_COLS=$cols
+  return 0
+}
+
+# "[####------]": $1 of $2 steps done, FIT_BAR_COLS wide.
+fit__bar() {
+  local n=$(( $1 * FIT_BAR_COLS / $2 )) done todo
+  printf -v done '%*s' "$n" ''; printf -v todo '%*s' "$(( FIT_BAR_COLS - n ))" ''
+  printf '[%s%s]' "${done// /#}" "${todo// /-}"
 }
 
 # Width and height in points of a laid-out graph (its first bb is the root's).

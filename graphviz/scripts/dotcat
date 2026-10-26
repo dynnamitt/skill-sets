@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 # dotcat — render a DOT graph sized to the current terminal window and show it inline
-# (kitty graphics protocol: kitty, Ghostty, WezTerm).
+# (kitty graphics protocol: kitty, Ghostty, WezTerm), under a "Title (LR)" header line.
 #
 # Usage: dotcat [--dir auto|TB|LR|BT|RL] [--rows N] [--fill] [--theme auto|dark|light]
-#               [-K engine] [-o out.png] [file.gv|-]
+#               [-K engine] [-w] [-o out.png] [file.gv|-]
 #   --dir auto  (default) pick TB or LR for this pane (references/orientation.md);
 #               a rankdir set in the file wins
 #   --rows N    terminal rows to leave free under the image (default 2: prompt + slack)
 #   --fill      scale small graphs up to the window (default: never above text size)
 #   --theme T   auto (default: re-colour on a dark terminal background), dark, light
 #   -K engine   dot (default), neato, fdp, sfdp, circo, twopi; --dir only affects dot
+#   -w, --watch full-window view that re-lays out and redraws when the window is resized
+#               (after it holds still for a second); q, Esc or Ctrl-C leaves it and
+#               reprints the last frame inline
 #   -o FILE     keep the PNG. Outside a graphics terminal the PNG is always written
 #               (to ./graph.png without -o) and its path printed.
 set -euo pipefail
@@ -17,12 +20,14 @@ set -euo pipefail
 DEFAULT_ROWS=2
 DEFAULT_OUT=graph.png
 FALLBACK_DPI=96
+WATCH_KEY_TIMEOUT_S=0.1           # key poll; also how soon a resize is noticed
+WATCH_IDS=(424211 424212)         # kitty image ids, alternated so a frame never blanks
 
 here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 # shellcheck source=dotfit.sh
 . "$here/dotfit.sh"
 
-dir=auto rows=$DEFAULT_ROWS fill= engine=dot out= src=-
+dir=auto rows=$DEFAULT_ROWS fill= engine=dot out= src=- watch=
 while [ $# -gt 0 ]; do
   case $1 in
     --dir) dir=$2; shift 2 ;;
@@ -30,6 +35,7 @@ while [ $# -gt 0 ]; do
     --fill) fill='!'; shift ;;
     --theme) FIT_THEME=$2; shift 2 ;;
     -K) engine=$2; shift 2 ;;
+    -w|--watch) watch=1; shift ;;
     -o) out=$2; shift 2 ;;
     -h|--help) sed -n '2,/^set /{/^set /d;s/^# \{0,1\}//;p}' "$0"; exit 0 ;;
     *) src=$1; shift ;;
@@ -46,9 +52,63 @@ if ! fit_gfx; then
   exit 0
 fi
 
-fit_measure "$rows"
-fit_colors
-fit_layout "$tmp/in.gv" "$tmp/laid.gv" "$dir" "$engine"
 png=${out:-$tmp/out.png}
-fit_recolor < "$tmp/laid.gv" | neato -n2 -Tpng -Gdpi="$FIT_DPI" -Gsize="$FIT_SIZE$fill" -o "$png"
-fit_show < "$png"
+
+# Measure, lay out for this window and render the PNG.
+#   @param {int} reserve  rows the image must leave free
+render() {
+  fit_measure "$1"
+  fit_layout "$tmp/in.gv" "$tmp/laid.gv" "$dir" "$engine"
+  fit_recolor < "$tmp/laid.gv" | neato -n2 -Tpng -Gdpi="$FIT_DPI" -Gsize="$FIT_SIZE$fill" -o "$png"
+}
+
+fit_colors
+fit_title "$tmp/in.gv" "$src"
+
+if [ -z "$watch" ]; then
+  render "$(( rows + FIT_HEADER_ROWS ))"
+  fit_header; printf '\n'
+  fit_show < "$png"
+  exit 0
+fi
+
+frame=0 tty_mode=$(stty -g </dev/tty)
+
+# Header on row 1, the image under it: new image id placed first, old one deleted after,
+# with the screen cleared inside the same synchronized update (one paint).
+draw() {
+  local id=${WATCH_IDS[frame % 2]} old=${WATCH_IDS[(frame + 1) % 2]}
+  frame=$(( frame + 1 ))
+  printf '\e[?2026h\e[2J\e[1;1H'; fit_header
+  fit_show --image-id "$id" --place "${FIT_COLS}x${FIT_ROWS}@0x${FIT_HEADER_ROWS}" < "$png"
+  printf '\e_Ga=d,d=I,i=%s,q=2\e\\' "$old"
+  printf '\e[?2026l'
+}
+
+# Leave the alt screen, give the tty back, reprint the last frame inline, clean up.
+leave() {
+  printf '\e_Ga=d,d=I,i=%s,q=2\e\\\e_Ga=d,d=I,i=%s,q=2\e\\' "${WATCH_IDS[@]}"
+  printf '\e[?25h\e[?1049l'
+  stty "$tty_mode" </dev/tty
+  fit_header; printf '\n'
+  [ -s "$png" ] && fit_show < "$png"
+  rm -rf "$tmp"
+}
+
+trap leave EXIT
+trap 'exit 130' INT TERM
+trap 'FIT_RESIZED=1' WINCH
+stty -echo -icanon </dev/tty
+printf '\e[?1049h\e[?25l'
+render "$FIT_HEADER_ROWS"
+draw
+while :; do
+  key=
+  IFS= read -rsn1 -t "$WATCH_KEY_TIMEOUT_S" key </dev/tty || :
+  case $key in q|Q|$'\e') break ;; esac
+  if [ -n "$FIT_RESIZED" ]; then
+    fit_settle
+    render "$FIT_HEADER_ROWS"
+    draw
+  fi
+done

@@ -18,7 +18,8 @@ piece is there, so the same approach can be rebuilt in another language.
 | Image scrolls up, half off screen | Something printed to the terminal (step output, the image's trailing newline) | Alt screen, `--place` at a fixed cell, cursor hidden, step output → log file |
 | Tearing on large images | Terminal painted mid-transfer | Synchronized update (`\e[?2026h` … `\e[?2026l`) |
 | No image at all, but rows are reserved | `icat` got a path and sent only that; the frame was overwritten before kitty read it | PNG on stdin ([terminal-display.md](terminal-display.md)) |
-| Wrong size after resizing the pane | Sized once at start | `trap … WINCH`, re-measure, redraw |
+| Wrong size after resizing the pane | Sized once at start | `trap … WINCH`; once the size settles, re-measure, lay out again, redraw (§5) |
+| Resize ignored until a step ends | bash runs traps only after the foreground command returns | Draw from a background poller, not the parent (§4) |
 | Slow frames on big graphs | Running `dot` layout every frame | Lay out once with `-Tdot`, render frames with `neato -n2` |
 
 ## 1. Stable geometry: declare everything, pin the layout
@@ -77,7 +78,7 @@ printf '\e[?2026l'                                         # end: terminal paint
 ```bash
 printf '\e[?1049h\e[?25l\e[H\e[2J'      # alt screen, hide cursor, clear once
 trap 'printf "\e[?2026l\e[?25h\e[?1049l"' EXIT
-trap 'resized=1' WINCH                  # re-measure and redraw on the next frame
+trap 'resized=1' WINCH                  # re-measure and redraw on the next frame (§5)
 ```
 
 The alternate screen keeps scrollback clean and gives a fixed canvas. On exit, leave it and
@@ -90,23 +91,44 @@ State in a bash variable dies with the subshell that set it. Keep it in files �
 node, written atomically (`printf … > tmp && mv tmp final`) — so background jobs can mark
 themselves done. Exactly one process draws:
 
-- parent draws after each `wait`, or
+- parent draws after each `wait` — but then a resize waits for the running step, since
+  bash defers traps while a foreground command runs — or
 - a poller (`until [ -e stop ]; do draw-if-changed; sleep 0.2; done &`) redraws when the
   state fingerprint differs from the last drawn one. This also rate-limits: bursts of state
   changes cost one frame. `disown` it — a bare `wait` in the script otherwise waits for the
   poller and hangs — and stop it with a flag file it checks between frames, not `kill`: a
   killed drawer can leave its `icat` running and an escape sequence half written.
 
+`dotlive.sh` always runs the poller in a graphics terminal (`live_start` starts it; calling
+`live_watch_start` as well is a no-op, so older scripts keep working). Its reader skips
+`live__put`'s `id.pid` temp files: a half-renamed `a.1234` would reach DOT as `a` then `.1234`.
+
 ```bash
 . dotlive.sh
-live_start build.gv
-live_watch_start                                   # background redraws
+live_start build.gv                                # poller included
 for t in lint test compile; do
   ( live_set "$t" running; "./$t.sh" >>"$LIVE_LOG" 2>&1 && live_set "$t" done || live_set "$t" failed ) &
 done
 wait
 live_stop
 ```
+
+## 5. Resizing
+
+A drag sends a burst of `SIGWINCH`. Redrawing on each one wastes layouts on sizes that last
+milliseconds, so the trap only sets a flag; the drawer then waits until the size has held
+for `FIT_RESIZE_SETTLE_S` (1 s), showing an ASCII bar on the header row (`pipeline (LR)
+[####------]`) that each new signal resets. The old frame stays up meanwhile, and state
+changes are held back — rendering into a window that is still changing is wasted.
+
+Once settled: re-measure, lay out again (TB/LR re-picked for the new shape, unless `--dir`
+or the file's `rankdir` forces it), re-render, and swap in with `\e[2J` *inside* the
+synchronized update, so the clear and the new frame paint as one. Re-render, don't just
+re-place the old image at a new cell size: `--place` never scales up, and scaled text stops
+matching the terminal's. Nodes move only on a resize, never on a state change.
+
+`dotcat -w` does the same for a static graph: alt screen, keys read from `/dev/tty`
+(`q`/Esc/Ctrl-C leave and reprint the frame inline).
 
 ## Throttling
 
