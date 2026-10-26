@@ -189,12 +189,19 @@ async function pollDot($: EngineInterface): Promise<void> {
 export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const host = hostOf($)
-    const tools = await resolveTools(host, options)
     const home = (await $.env.get('HOME')) ?? ''
     const cacheDir = `${(await $.env.get('XDG_CACHE_HOME')) || `${home}/.cache`}/graph-in-pane`
-    const parserDirs = tools['ast-grep'] === undefined ? await nvimParserDirs(host, tools, options) : []
-    const osRelease = await host.read('/etc/os-release').catch(() => '')
-    const hasBrew = (await host.run(['sh', '-c', 'command -v brew'], { stdin: '' }).catch(() => ({ exitCode: 1 }))).exitCode === 0
+    const [{ tools, parserDirs }, osRelease, hasBrew] = await Promise.all([
+      resolveTools(host, options).then(async tools => ({
+        tools,
+        parserDirs: tools['ast-grep'] === undefined ? await nvimParserDirs(host, tools, options) : [],
+      })),
+      host.read('/etc/os-release').catch(() => ''),
+      host
+        .run(['sh', '-c', 'command -v brew'], { stdin: '' })
+        .catch(() => ({ exitCode: 1 }))
+        .then(result => result.exitCode === 0),
+    ])
     const hints: Hints = { dot: installHint(osRelease, hasBrew, 'dot'), astGrep: installHint(osRelease, hasBrew, 'ast-grep') }
     await update($, toolsAtom, () => tools)
     await update($, metaAtom, meta => ({

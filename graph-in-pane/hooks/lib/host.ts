@@ -58,3 +58,20 @@ export const safely = async <T>(work: () => Promise<T>, onError: (message: strin
     return onError(messageOf(err))
   }
 }
+
+/**
+ * Maps `items` through `fn` with at most `limit` calls in flight; results keep input order.
+ * @param {readonly T[]} items the inputs
+ * @param {number} limit the most calls running at once
+ * @param {(item: T) => Promise<R>} fn the async mapper
+ * @returns {Promise<R[]>} the results, in input order
+ */
+export const mapLimit = async <T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> => {
+  const out: R[] = new Array(items.length)
+  let next = 0
+  const worker = async (): Promise<void> => {
+    for (let i = next++; i < items.length; i = next++) out[i] = await fn(items[i] as T)
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  return out
+}

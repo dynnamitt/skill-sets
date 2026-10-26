@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import { listSourceFiles, ownResolver } from '../hooks/lib/extract'
-import type { Host } from '../hooks/lib/host'
+import { EXTRACT_CONCURRENCY, listSourceFiles, MAX_FILES, MAX_LISTED, ownResolver } from '../hooks/lib/extract'
+import { type Host, mapLimit } from '../hooks/lib/host'
 import { fileSkeleton, langOf, langOfShebang, specsOf, toRows } from '../hooks/lib/skeleton'
 import { ROWS as PAIR } from './fixtures/pair.rows'
 import { ROWS as VITE } from './fixtures/vite.rows'
@@ -95,6 +95,36 @@ test('a big dir skips ignored folders and caps at 200 files', async () => {
   expect(files.length).toBe(200)
   expect(omitted).toBe(51)
   expect(files.filter(f => f.path.includes('node_modules'))).toEqual([])
+})
+
+test('mapLimit keeps order and never runs more than the limit', async () => {
+  let live = 0, peak = 0
+  const out = await mapLimit([1, 2, 3, 4, 5, 6], 2, async n => { peak = Math.max(peak, ++live); await Promise.resolve(); live--; return n * 10 })
+  expect([out, peak]).toEqual([[10, 20, 30, 40, 50, 60], 2])
+})
+
+test('the walk stops listing once MAX_LISTED files are found', async () => {
+  const dirs = Array.from({ length: 30 }, (_, i) => `d${String(i).padStart(2, '0')}`)
+  const tree = Object.fromEntries([
+    ['/p', dirs.map(d => entry(d, 'dir'))],
+    ...dirs.map(d => [`/p/${d}`, Array.from({ length: 100 }, (_, i) => entry(`f${String(i).padStart(3, '0')}.ts`, 'file'))] as const),
+  ])
+  const listed: string[] = []
+  const base = treeHost(tree)
+  const { files, omitted } = await listSourceFiles({ ...base, list: async dir => (listed.push(dir), base.list(dir)) }, '/p')
+  expect([files.length, omitted, listed.length < 30]).toEqual([MAX_FILES, MAX_LISTED - MAX_FILES, true])
+})
+
+test('shebang probes in a dir run at most EXTRACT_CONCURRENCY at once', async () => {
+  const names = Array.from({ length: 40 }, (_, i) => `script${String(i).padStart(2, '0')}`)
+  let live = 0, peak = 0
+  const base = treeHost({ '/p': names.map(n => entry(n, 'file')) })
+  const host: Host = {
+    ...base,
+    read: async () => { peak = Math.max(peak, ++live); await new Promise(r => setTimeout(r, 1)); live--; return '#!/bin/sh\n' },
+  }
+  const { files } = await listSourceFiles(host, '/p')
+  expect([files.length, peak <= EXTRACT_CONCURRENCY, peak > 1]).toEqual([MAX_FILES > 40 ? 40 : MAX_FILES, true, true])
 })
 
 test('a dir walk lists extension-less shebang scripts and skips plain files', async () => {

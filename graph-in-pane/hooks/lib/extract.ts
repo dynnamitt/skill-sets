@@ -1,11 +1,13 @@
 import type { Tools } from '../../types'
 import { fallbackRows } from './fallback'
-import { type Host, safely } from './host'
+import { type Host, mapLimit, safely } from './host'
 import { base, dirOf, normalize } from './path'
 import { RULES } from './rules'
 import { type AstRow, type FileSkeleton, fileSkeleton, type Lang, langOf, langOfShebang, type Skeleton, specsOf, toRows } from './skeleton'
 
 export const MAX_FILES = 200
+export const MAX_LISTED = 2000, EXTRACT_CONCURRENCY = 8
+const PROBE_BATCH = 64
 const IGNORED_DIRS: ReadonlySet<string> = new Set(['node_modules', 'dist', 'build', 'target', '.venv'])
 
 export type Failure = { error: string }
@@ -52,24 +54,38 @@ export const noGrammar = (path: string): string => {
   return `no grammar for ${name.includes('.') ? name.slice(name.lastIndexOf('.')) : name}`
 }
 
-/** The source files under a dir, ignored dirs skipped, sorted, capped at MAX_FILES. */
+/** The source files under a dir, ignored dirs skipped, sorted, capped at MAX_FILES. The walk stops at MAX_LISTED. */
 export const listSourceFiles = async (host: Host, dir: string): Promise<{ files: SourceFile[]; omitted: number }> => {
-  const walk = async (at: string): Promise<SourceFile[]> => {
+  // Probes entries in batches, bounded, until `room` source files are found.
+  const probe = async (paths: readonly string[], room: number, found: SourceFile[] = []): Promise<SourceFile[]> => {
+    if (paths.length === 0 || found.length >= room) return found.slice(0, room)
+    const batch = await mapLimit(paths.slice(0, PROBE_BATCH), EXTRACT_CONCURRENCY, async path => ({
+      path,
+      lang: await langOfFile(host, path),
+    }))
+    const hits = batch.filter((file): file is SourceFile => file.lang !== null)
+    return probe(paths.slice(PROBE_BATCH), room, [...found, ...hits])
+  }
+  // Depth-first and in sequence: a dir's files, then its subdirs, each sorted.
+  const walk = async (at: string, room: number): Promise<SourceFile[]> => {
+    if (room <= 0) return []
     // An unreadable folder is skipped, not fatal.
     const entries = [...(await host.list(at).catch(() => []))].sort((a, b) => a.name.localeCompare(b.name))
-    const nested = await Promise.all(
-      entries
-        .filter(entry => entry.kind === 'dir' && !entry.name.startsWith('.') && !IGNORED_DIRS.has(entry.name))
-        .map(entry => walk(`${at}/${entry.name}`)),
+    const here = await probe(
+      entries.filter(entry => entry.kind === 'file').map(entry => `${at}/${entry.name}`),
+      room,
     )
-    const here = await Promise.all(
-      entries
-        .filter(entry => entry.kind === 'file')
-        .map(async entry => ({ path: `${at}/${entry.name}`, lang: await langOfFile(host, `${at}/${entry.name}`) })),
-    )
-    return [...here.filter((file): file is SourceFile => file.lang !== null), ...nested.flat()]
+    return entries
+      .filter(entry => entry.kind === 'dir' && !entry.name.startsWith('.') && !IGNORED_DIRS.has(entry.name))
+      .reduce(
+        async (acc, entry) => {
+          const so = await acc
+          return so.length >= room ? so : [...so, ...(await walk(`${at}/${entry.name}`, room - so.length))]
+        },
+        Promise.resolve(here),
+      )
   }
-  const all = await walk(dir)
+  const all = await walk(dir, MAX_LISTED)
   return { files: all.slice(0, MAX_FILES), omitted: Math.max(0, all.length - MAX_FILES) }
 }
 
@@ -124,7 +140,7 @@ export const extractTarget = async (
   }
   const { files, omitted } = await listSourceFiles(host, path)
   if (files.length === 0) return { error: `no bash, TypeScript or JavaScript files under ${path}` }
-  const skeletons = await Promise.all(files.map(file => extractFile(host, tools, file.path, file.lang, parserDirs, missing)))
+  const skeletons = await mapLimit(files, EXTRACT_CONCURRENCY, file => extractFile(host, tools, file.path, file.lang, parserDirs, missing))
   const failed = skeletons.find(isFailure)
   return failed !== undefined && skeletons.every(isFailure)
     ? failed
