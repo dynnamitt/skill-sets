@@ -13,6 +13,8 @@ const FILES = {
 const TOOL = 'mcp__graph-in-pane__show_graph'
 const start = async ($: Engine) => $.session.start({ cwd: '/fx', surface: 'terminal', isInteractive: true })
 const show = async ($: Engine, input: Record<string, unknown>) => $.tool.call({ tool: TOOL, ...input } as never)
+const skeleton = async ($: Engine, target: string) =>
+  $.tool.call({ tool: 'mcp__graph-in-pane__graph_skeleton', target } as never)
 const nav = (w: ReturnType<typeof world>): Nav => stateOf<Nav>(w, 'nav') ?? { stack: [] }
 const textOf = (result: { result?: unknown; text?: string }): string => String(result.text ?? result.result ?? '')
 
@@ -81,6 +83,13 @@ test('a plan graph does not replace a tree being browsed', async ($, on) => {
   expect(w.status).toContain('plan graph updated · /graph')
 })
 
+test('/graph-flow runs no ast-grep itself; only graph_skeleton does', async ($, on) => {
+  const w = world(on, FILES)
+  await start($)
+  await runCommand($, 'graph-flow', 'pair.sh')
+  expect(w.runs.filter(argv => argv[0] === '/bin/ast-grep')).toEqual([])
+})
+
 test('/10kfo sends the skeleton to Claude and waits; the answer replaces the wait', async ($, on) => {
   const w = world(on, FILES)
   await start($)
@@ -105,4 +114,37 @@ test('a graph shown in the pane clears a stale plan-graph status', async ($, on)
   await show($, { kind: 'plan', title: 'plan', dot: 'digraph p { idea -> build }' })
   await runCommand($, 'graph', '')
   expect(w.status[w.status.length - 1]).toBeUndefined()
+})
+
+test('a flow whose DOT fails shows the error in place of the wait, and a retry replaces it', async ($, on) => {
+  const w = world(on, FILES)
+  await start($)
+  await runCommand($, 'graph-flow', 'pair.sh')
+  w.dotFails = { stderr: 'Error: syntax error\n' }
+  await show($, { kind: 'flow', title: 'bad', dot: 'digraph g { a -> }', target: '/fx/pair.sh' })
+  expect([nav(w).stack[0]?.waiting, nav(w).stack[0]?.error]).toEqual([false, 'Error: syntax error'])
+  w.dotFails = null
+  await show($, { kind: 'flow', title: 'good', dot: 'digraph g { a -> b }', target: '/fx/pair.sh' })
+  expect(nav(w).stack.map(v => [v.title, v.error])).toEqual([['good', null]])
+})
+
+test('a show_graph target Claude supplies is normalized before matching the wait', async ($, on) => {
+  const w = world(on, FILES)
+  await start($)
+  await runCommand($, 'graph-flow', 'pair.sh')
+  w.dotFails = { stderr: 'Error: syntax error\n' }
+  await show($, { kind: 'flow', title: 'bad', dot: 'digraph g { a -> }', target: '/fx/./pair.sh' })
+  expect(nav(w).stack.map(v => [v.waiting, v.error])).toEqual([[false, 'Error: syntax error']])
+  w.dotFails = null
+  await show($, { kind: 'flow', title: 'good', dot: 'digraph g { a -> b }', target: '/fx/./pair.sh' })
+  expect(nav(w).stack.map(v => [v.title, v.error])).toEqual([['good', null]])
+})
+
+test('a graph_skeleton failure for the awaited target shows in the pane', async ($, on) => {
+  const w = world(on, { ...FILES })
+  await start($)
+  await runCommand($, 'graph-flow', 'pair.sh')
+  delete w.files['/fx/pair.sh']
+  await skeleton($, '/fx/pair.sh')
+  expect([nav(w).stack[0]?.waiting, nav(w).stack[0]?.error]).toEqual([false, 'not found: /fx/pair.sh'])
 })

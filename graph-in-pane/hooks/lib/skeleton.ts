@@ -1,15 +1,22 @@
+/** A language the pane can graph. */
 export type Lang = 'bash' | 'typescript' | 'tsx' | 'javascript'
 type Pos = { line: number; column: number }
+/** One rule match: the rule id, the matched text and its range. */
 export type AstRow = { ruleId: string; text: string; start: Pos; end: Pos }
+/** A function and its line range. */
 export type Fn = { name: string; startLine: number; endLine: number }
 /** `from` is a function name or `(top)`. */
 export type Call = { from: string; to: string; line: number; kind: 'fn' | 'external' }
+/** A bash `exit` and its code, null when not a number. */
 export type Exit = { from: string; code: number | null; line: number }
 /** `resolved` is the absolute path of an own file, else null. */
 export type Dep = { from: string; spec: string; resolved: string | null; line: number }
+/** One file's functions, calls, exits and dependencies. */
 export type FileSkeleton = { file: string; lang: Lang; fns: Fn[]; calls: Call[]; exits: Exit[]; deps: Dep[] }
-export type Skeleton = { root: string; files: FileSkeleton[]; omitted: number }
+/** The skeletons of a file or dir; `omitted` counts files past the cap, a floor when `truncated`. */
+export type Skeleton = { root: string; files: FileSkeleton[]; omitted: number; truncated: boolean }
 
+/** The owner name of code outside any function. */
 export const TOP = '(top)'
 
 const EXT_LANG: Readonly<Record<string, Lang>> = {
@@ -25,16 +32,47 @@ const EXT_LANG: Readonly<Record<string, Lang>> = {
   jsx: 'javascript',
 }
 
-/** The language of a path by its extension; shebang detection is extract's. */
+/**
+ * The language of a path by its extension; null when it has none or an unknown one (shebangs: `langOfShebang`).
+ * @param {string} path a file path
+ * @returns {Lang | null} the language, else null
+ */
 export const langOf = (path: string): Lang | null => {
   const name = path.split('/').pop() ?? ''
   const dot = name.lastIndexOf('.')
   return dot > 0 ? (EXT_LANG[name.slice(dot + 1)] ?? null) : null
 }
 
+const INTERPRETER_LANG: Readonly<Record<string, Lang>> = {
+  bash: 'bash',
+  sh: 'bash',
+  dash: 'bash',
+  node: 'javascript',
+  tsx: 'typescript',
+  'ts-node': 'typescript',
+}
+
+/**
+ * The language named by a `#!` first line; `env` and `env -S` are skipped.
+ * @param {string} text the file's contents (only the first line is read)
+ * @returns {Lang | null} the language, else null for no shebang or an unknown interpreter
+ */
+export const langOfShebang = (text: string): Lang | null => {
+  const line = text.split('\n', 1)[0] ?? ''
+  if (!line.startsWith('#!')) return null
+  const words = line.slice(2).trim().split(/\s+/)
+  const program = (words[0] ?? '').split('/').pop()
+  const target = program === 'env' ? words.slice(1).find(word => !word.startsWith('-') && !word.includes('=')) : program
+  return INTERPRETER_LANG[(target ?? '').split('/').pop() ?? ''] ?? null
+}
+
 type JsonRow = { ruleId: string; text: string; range: { start: Pos; end: Pos } }
 
-/** ast-grep `--json=stream` output (or recorded rows) as AstRows. */
+/**
+ * ast-grep `--json=stream` output (or recorded rows) as AstRows.
+ * @param {string | readonly JsonRow[]} input the stream text, or rows already parsed
+ * @returns {AstRow[]} the rows
+ */
 export const toRows = (input: string | readonly JsonRow[]): AstRow[] =>
   (typeof input === 'string'
     ? input
@@ -72,13 +110,20 @@ const owner = (fns: readonly Fn[], line: number): string =>
 
 const quoted = (text: string): string | null => text.match(/['"]([^'"]+)['"]\s*;?\s*$/)?.[1] ?? null
 
+const unquoted = (text: string): string => text.replace(/^(['"])(.*)\1$/, '$2')
+
 const specOf = (lang: Lang, row: AstRow): string | null =>
-  lang === 'bash' ? (row.text.split(/\s+/)[1] ?? null) : quoted(row.text)
+  lang === 'bash' ? unquoted(row.text.split(/\s+/)[1] ?? '') || null : quoted(row.text)
 
 const depRows = (rows: readonly AstRow[], lang: Lang): AstRow[] =>
   rows.filter(row => row.ruleId === (lang === 'bash' ? 'source' : 'import'))
 
-/** The dependency specs of a file, in order, for resolving before fileSkeleton. */
+/**
+ * The dependency specs of a file, in order, for resolving before fileSkeleton.
+ * @param {readonly AstRow[]} rows the file's rule matches
+ * @param {Lang} lang the file's language
+ * @returns {string[]} the import or source specs
+ */
 export const specsOf = (rows: readonly AstRow[], lang: Lang): string[] =>
   depRows(rows, lang)
     .map(row => specOf(lang, row))
@@ -121,7 +166,14 @@ const scriptCalls = (rows: readonly AstRow[], fns: readonly Fn[]): Call[] => {
     }))
 }
 
-/** The skeleton of one file from its ast-grep rows; `resolve` maps a spec to an own file. */
+/**
+ * The skeleton of one file from its ast-grep rows; `resolve` maps a spec to an own file.
+ * @param {string} file the file's path
+ * @param {Lang} lang the file's language
+ * @param {readonly AstRow[]} rows the file's rule matches
+ * @param {(spec: string) => string | null} resolve maps a spec to an absolute own file, else null
+ * @returns {FileSkeleton} the file's functions, calls, exits and dependencies
+ */
 export const fileSkeleton = (
   file: string,
   lang: Lang,
@@ -150,7 +202,13 @@ export const fileSkeleton = (
   return { file, lang, fns, calls, exits, deps }
 }
 
-/** The skeleton narrowed to one function of one file: what it calls, exits and sources. */
+/**
+ * The skeleton narrowed to one function of one file: what it calls, exits and sources.
+ * @param {Skeleton} sk the full skeleton
+ * @param {string} file the file to keep
+ * @param {string} fn the function to keep
+ * @returns {Skeleton} the narrowed skeleton
+ */
 export const narrow = (sk: Skeleton, file: string, fn: string): Skeleton => ({
   ...sk,
   files: sk.files
@@ -164,13 +222,19 @@ export const narrow = (sk: Skeleton, file: string, fn: string): Skeleton => ({
     })),
 })
 
+/** One file cut down to a line: names and counts. */
 export type FileSummary = { file: string; lang: Lang; fns: string[]; ownDeps: string[]; externals: number; exits: (number | null)[] }
 
-/** A dir's skeleton cut down to one line per file, so a big dir stays small for the model. */
-export const summarize = (sk: Skeleton): { root: string; summary: true; omitted: number; files: FileSummary[] } => ({
+/**
+ * A dir's skeleton cut down to one line per file, so a big dir stays small for the model.
+ * @param {Skeleton} sk the full skeleton
+ * @returns {{ root: string; summary: true; omitted: number; truncated: boolean; files: FileSummary[] }} one summary per file
+ */
+export const summarize = (sk: Skeleton): { root: string; summary: true; omitted: number; truncated: boolean; files: FileSummary[] } => ({
   root: sk.root,
   summary: true,
   omitted: sk.omitted,
+  truncated: sk.truncated,
   files: sk.files.map(f => ({
     file: f.file,
     lang: f.lang,

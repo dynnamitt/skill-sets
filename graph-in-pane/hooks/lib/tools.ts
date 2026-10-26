@@ -13,7 +13,11 @@ const OPTION_OF: Readonly<Partial<Record<ToolName, string>>> = {
   'tree-sitter': 'treeSitterPath',
 }
 
-/** Where user-installed binaries live on common distros, after PATH. */
+/**
+ * Where user-installed binaries live on common distros, after PATH.
+ * @param {string} home the user's home dir
+ * @returns {readonly string[]} dirs to look in, in order
+ */
 export const candidateDirs = (home: string): readonly string[] => [
   '/home/linuxbrew/.linuxbrew/bin',
   `${home}/.linuxbrew/bin`,
@@ -54,7 +58,12 @@ const resolveOne = async (
   )
 }
 
-/** Finds each host tool: the option's path, then PATH, then common bin dirs. */
+/**
+ * Finds each host tool: the option's path, then PATH, then common bin dirs.
+ * @param {Host} host runs `command -v` and checks paths
+ * @param {PluginOptions} options the plugin options (`dotPath`, `astGrepPath`, `treeSitterPath`)
+ * @returns {Promise<Tools>} the paths of the tools that were found
+ */
 export const resolveTools = async (host: Host, options: PluginOptions): Promise<Tools> => {
   const home = (await host.env('HOME')) ?? ''
   const found = await Promise.all(
@@ -92,7 +101,13 @@ const HINTS: Readonly<Record<Family, (hasBrew: boolean) => Readonly<Record<'dot'
       : { dot: 'install graphviz with your package manager', 'ast-grep': PORTABLE_AST_GREP },
 }
 
-/** The install line for a missing tool on the distro /etc/os-release describes. */
+/**
+ * The install line for a missing tool on the distro /etc/os-release describes.
+ * @param {string} osRelease the text of /etc/os-release
+ * @param {boolean} hasBrew whether Homebrew is installed
+ * @param {ToolName} missing the tool that was not found
+ * @returns {string} the message to show
+ */
 export const installHint = (osRelease: string, hasBrew: boolean, missing: ToolName): string =>
   missing === 'dot' || missing === 'ast-grep'
     ? `${missing} not found. Install: ${HINTS[familyOf(osRelease)](hasBrew)[missing]}`

@@ -35,6 +35,8 @@ export type World = {
   noPng: boolean
   /** Every argv the plugin ran. */
   runs: string[][]
+  /** Runs once inside the next dot run, then clears itself. */
+  beforeDot: (() => Promise<void>) | null
 }
 
 /** Answers every host call the plugin makes from memory: files, ast-grep, dot, state, ui. */
@@ -42,7 +44,7 @@ export const world = (on: On, files: Record<string, FakeFile>): World => {
   const clock = mock.clock(on, { now: 1000 })
   const w: World = {
     files, dotInputs: [], dotFails: null, state: {}, writes: [], submitted: [], status: [], placed: true, clock,
-    denied: [], noDot: false, dotRejects: false, noPng: false, runs: [],
+    denied: [], noDot: false, dotRejects: false, noPng: false, runs: [], beforeDot: null,
   }
   mock.env(on, { HOME: '/h' })
   on('fs.exists', (_, e) => ({ value: e.path in w.files }))
@@ -66,7 +68,7 @@ export const world = (on: On, files: Record<string, FakeFile>): World => {
     if (file === undefined || file.kind === 'dir') throw new Error(`EISDIR or ENOENT: ${e.path}`)
     return { value: file.text ?? '' }
   })
-  on('process.run', (_, e) => {
+  on('process.run', async (_, e) => {
     const [cmd, ...rest] = e.argv
     w.runs.push([...e.argv])
     if (cmd === 'sh') {
@@ -81,6 +83,9 @@ export const world = (on: On, files: Record<string, FakeFile>): World => {
     }
     if (cmd === '/bin/unflatten') return ok(`${e.init?.stdin ?? ''}\n// unflattened`)
     if (cmd === '/bin/dot') {
+      const before = w.beforeDot
+      w.beforeDot = null
+      await before?.()
       if (w.dotRejects) throw new Error('timed out after 15000 ms')
       w.dotInputs.push(e.init?.stdin ?? '')
       return w.dotFails === null ? ok() : ok('', 1, w.dotFails.stderr)

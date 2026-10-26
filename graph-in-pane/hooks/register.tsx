@@ -2,9 +2,9 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Hints, Meta, Nav, PlanState, View } from '../types'
-import { redrawDot, type RenderCtx, renderView, resolveTarget, summary, treeView } from './lib/commands'
+import { flowCheck, redrawDot, type RenderCtx, renderView, resolveTarget, skeletonOf, summary, treeView } from './lib/commands'
 import { styleDot } from './lib/dot'
-import { extractTarget, isFailure } from './lib/extract'
+import { isFailure } from './lib/extract'
 import { nvimParserDirs } from './lib/fallback'
 import {
   flowRequest,
@@ -26,8 +26,9 @@ import { isPlanningSkill, PLAN_SECTION_ID, PLAN_TEXT, type PlanEvent, planTransi
 import { installHint, resolveTools, type Tools } from './lib/tools'
 import { narrow, summarize } from './lib/skeleton'
 
+/** The id of the graph pane. */
 export const PANE_ID = 'graph'
-const DOT_POLL_MS = 1000
+const DOT_POLL_MS = 1000, DEFAULT_ROWS = 24
 
 // The engine reads `$.state` keys off this file's own consts, so every atom
 // lives here; lib/ stays pure or takes a Host.
@@ -55,6 +56,14 @@ async function showView($: EngineInterface, view: View, how: 'reset' | 'push' | 
   await dispatch($, { type: how, view })
   const opened = await $.ui.open({ id: PANE_ID, title: `Graph · ${view.title}` })
   // A graph on screen makes an earlier "plan graph updated · /graph" stale.
+  if (opened.isPlaced) $.ui.status(undefined)
+  return { isPlaced: opened.isPlaced }
+}
+
+/** Like showView with replaceTop, but only if `was` is still the top view. */
+async function showReplacing($: EngineInterface, was: View, view: View): Promise<{ isPlaced: boolean }> {
+  await dispatch($, { type: 'replaceIf', was, view })
+  const opened = await $.ui.open({ id: PANE_ID, title: `Graph · ${view.title}` })
   if (opened.isPlaced) $.ui.status(undefined)
   return { isPlaced: opened.isPlaced }
 }
@@ -91,23 +100,17 @@ async function treeTarget($: EngineInterface, target: string): Promise<{ text: s
 
 /** Extracts a target's skeleton, shows a waiting view and asks Claude for its flow graph. */
 async function flowAsk($: EngineInterface, target: string, how: 'reset' | 'push'): Promise<{ text: string }> {
-  const { ctx } = await renderCtx($)
-  const host = hostOf($)
   const [file = target] = target.split('#')
-  const stat = await host.stat(file)
-  const sk =
-    stat === null
-      ? { error: `not found: ${file}` }
-      : await extractTarget(host, ctx.tools, file, stat.kind === 'dir', ctx.parserDirs, ctx.hints.astGrep)
-  if (isFailure(sk)) {
-    const view = { ...emptyView('flow', file, target), error: sk.error }
+  const checked = await flowCheck(hostOf($), file)
+  if (isFailure(checked)) {
+    const view = { ...emptyView('flow', file, target), error: checked.error }
     await showView($, view, (await read($, navAtom)).stack.length > 0 ? 'push' : how)
     return { text: summary(view) }
   }
   await showView($, waitingView(target), how)
   // A command hook holds the turn; the submit runs once it has returned.
   $.clock.after(0, () => void $.prompt.submit({ text: flowRequest(target) }))
-  return { text: flowSummary(sk, target) }
+  return { text: flowSummary(target, checked.files) }
 }
 
 async function flowCommand($: EngineInterface, args: string): Promise<{ text: string }> {
@@ -121,26 +124,36 @@ async function openBox($: EngineInterface, n: number): Promise<void> {
   const box = top?.openable.find(o => o.n === n)
   if (top === undefined || box === undefined) return
   if (top.mode === 'flow') {
-    await flowAsk($, box.target, 'push')
+    await flowAsk($, await targetOf($, box.target), 'push')
     return
   }
   const { ctx, gen } = await renderCtx($)
   await showView($, await treeView(hostOf($), ctx, box.target, gen), 'push')
 }
 
+/** Whether the top view is a flow pane waiting on (or showing a failure for) this target. */
+function awaitsFlow(top: View | undefined, target: string): boolean {
+  return top !== undefined && top.mode === 'flow' && top.target === target && (top.waiting || top.error !== null)
+}
+
+/** Replaces the waiting flow view for a target with the error that ended the wait. */
+async function failWaiting($: EngineInterface, target: string, error: string): Promise<void> {
+  const top = topOf(await read($, navAtom))
+  if (top !== undefined && awaitsFlow(top, target)) await dispatch($, { type: 'replaceIf', was: top, view: { ...top, waiting: false, error } })
+}
+
 /** Serves graph_skeleton: the tree-sitter skeleton of a file or dir, as JSON. */
 async function handleSkeleton($: EngineInterface, input: Record<string, unknown>) {
   const meta = await read($, metaAtom)
   const tools = await read($, toolsAtom)
-  const [file = '', fn] = (await targetOf($, typeof input.target === 'string' ? input.target : '')).split('#')
-  const host = hostOf($)
-  const stat = await host.stat(file)
-  const isDir = stat?.kind === 'dir'
-  const sk =
-    stat === null
-      ? { error: `not found: ${file}` }
-      : await extractTarget(host, tools, file, isDir, meta.parserDirs, (meta.hints ?? EMPTY_HINTS).astGrep)
-  if (isFailure(sk)) return { isError: true as const, result: sk.error, text: sk.error }
+  const target = await targetOf($, typeof input.target === 'string' ? input.target : '')
+  const [file = '', fn] = target.split('#')
+  const extracted = await skeletonOf(hostOf($), ctxOf(meta, tools), file)
+  if (isFailure(extracted)) {
+    await failWaiting($, target, extracted.error)
+    return { isError: true as const, result: extracted.error, text: extracted.error }
+  }
+  const { sk, isDir } = extracted
   // A file#fn target answers that function alone; a dir answers one line per file.
   const answer = fn !== undefined && fn !== '' ? narrow(sk, file, fn) : isDir ? summarize(sk) : sk
   return { result: JSON.stringify(answer) }
@@ -155,6 +168,7 @@ async function handleShowGraph($: EngineInterface, input: Record<string, unknown
   const view = await renderView(hostOf($), ctx, base, styleDot(parsed.dot), gen)
   if (view.error !== null) {
     const text = `dot failed: ${view.error}`
+    if (parsed.kind === 'flow') await failWaiting($, await targetOf($, parsed.target), view.error)
     return { isError: true as const, result: text, text }
   }
   const nav = await read($, navAtom)
@@ -166,8 +180,8 @@ async function handleShowGraph($: EngineInterface, input: Record<string, unknown
       return { result: RESULT.stored }
     }
   }
-  const how = parsed.kind === 'flow' && top?.waiting === true && top.target === parsed.target ? 'replaceTop' : 'reset'
-  const { isPlaced } = await showView($, view, how)
+  const isAwaited = parsed.kind === 'flow' && awaitsFlow(top, await targetOf($, parsed.target))
+  const { isPlaced } = await (isAwaited && top !== undefined ? showReplacing($, top, view) : showView($, view, 'reset'))
   if (!isPlaced) $.ui.status(RESULT.status)
   return { result: isPlaced ? RESULT.shown : RESULT.hidden }
 }
@@ -178,18 +192,31 @@ async function pollDot($: EngineInterface): Promise<void> {
   if (top === undefined || top.mode !== 'dot') return
   const ctx = ctxOf(await read($, metaAtom), await read($, toolsAtom))
   const redrawn = await redrawDot(hostOf($), ctx, top, async () => (await renderCtx($)).gen).catch(() => null)
-  if (redrawn !== null) await dispatch($, { type: 'replaceTop', view: redrawn })
+  if (redrawn !== null) await dispatch($, { type: 'replaceIf', was: top, view: redrawn })
 }
 
+/**
+ * The mod's hooks module: session start, the /graph commands, the show_graph and graph_skeleton tools, and plan tracking.
+ * @param {Parameters<Register>[0]} on registers a hook for an event
+ * @param {Parameters<Register>[1]} options the plugin options
+ * @returns {void}
+ */
 export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const host = hostOf($)
-    const tools = await resolveTools(host, options)
     const home = (await $.env.get('HOME')) ?? ''
     const cacheDir = `${(await $.env.get('XDG_CACHE_HOME')) || `${home}/.cache`}/graph-in-pane`
-    const parserDirs = tools['ast-grep'] === undefined ? await nvimParserDirs(host, tools, options) : []
-    const osRelease = await host.read('/etc/os-release').catch(() => '')
-    const hasBrew = (await host.run(['sh', '-c', 'command -v brew'], { stdin: '' }).catch(() => ({ exitCode: 1 }))).exitCode === 0
+    const [{ tools, parserDirs }, osRelease, hasBrew] = await Promise.all([
+      resolveTools(host, options).then(async tools => ({
+        tools,
+        parserDirs: tools['ast-grep'] === undefined ? await nvimParserDirs(host, tools, options) : [],
+      })),
+      host.read('/etc/os-release').catch(() => ''),
+      host
+        .run(['sh', '-c', 'command -v brew'], { stdin: '' })
+        .catch(() => ({ exitCode: 1 }))
+        .then(result => result.exitCode === 0),
+    ])
     const hints: Hints = { dot: installHint(osRelease, hasBrew, 'dot'), astGrep: installHint(osRelease, hasBrew, 'ast-grep') }
     await update($, toolsAtom, () => tools)
     await update($, metaAtom, meta => ({
@@ -209,7 +236,15 @@ export const register: Register = (on, options) => {
     await $.tool.register({ name: SKELETON, description: SKELETON_DESCRIPTION, inputSchema: SKELETON_SCHEMA, isDeferred: false })
     await $.tool.register({ name: SHOW_GRAPH, description: SHOW_GRAPH_DESCRIPTION, inputSchema: SHOW_GRAPH_SCHEMA, isDeferred: false })
     await $.command.register({ name: 'graph', description: 'Reopen the graph pane (latest plan graph first); /graph off stops plan graphs', argumentHint: '[off]' })
-    $.clock.every(DOT_POLL_MS, () => void pollDot($))
+    // One poll at a time: a slow dot run must not be raced by the next tick.
+    let isPolling = false
+    $.clock.every(DOT_POLL_MS, () => {
+      if (isPolling) return
+      isPolling = true
+      void pollDot($).catch(() => undefined).finally(() => {
+        isPolling = false
+      })
+    })
 
     return next(e)
   })
@@ -275,7 +310,7 @@ export const register: Register = (on, options) => {
     return paneTree(
       $.ui.resolve(e),
       nav,
-      { surface: e.surface, bodyColumns: e.props.bodyColumns, rows: e.viewport?.rows ?? 24, isFocused: e.props.isFocused },
+      { surface: e.surface, bodyColumns: e.props.bodyColumns, rows: e.viewport?.rows ?? DEFAULT_ROWS, isFocused: e.props.isFocused },
       {
         back: () => void dispatch($, { type: 'pop' }),
         open: n => void openBox($, n),

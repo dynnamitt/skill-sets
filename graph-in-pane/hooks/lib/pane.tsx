@@ -4,13 +4,22 @@ import type { Nav, View } from '../../types'
 import { fitBox } from './dot'
 import { PAGE, pageOf, topOf } from './nav'
 
+/** What the pane draws with: surface, width, rows and focus. */
 export type PaneCtx = { surface: RenderSurface; bodyColumns: number; rows: number; isFocused: boolean }
+/** The handlers the pane's buttons call. */
 export type PaneActions = { back: () => void; open: (n: number) => void; more: () => void }
 
 const EMPTY = 'No graph yet: /graph-tree or /graph-flow a file or dir.'
 const CHROME_ROWS = 6
 
-/** The pane's drawing for the breadcrumb's top view; pure, handlers passed in. */
+/**
+ * The pane's drawing for the breadcrumb's top view; pure, handlers passed in.
+ * @param {Elements[RenderSurface]} t the surface's element table
+ * @param {Nav} nav the breadcrumb
+ * @param {PaneCtx} ctx surface, size and focus
+ * @param {PaneActions} actions the button handlers
+ * @returns the pane's element tree
+ */
 export const paneTree = (t: Elements[RenderSurface], nav: Nav, ctx: PaneCtx, actions: PaneActions) => {
   const { Box, Text, Button } = t
   // Other surfaces' tables carry an Image that draws nothing: only the terminal paints one.

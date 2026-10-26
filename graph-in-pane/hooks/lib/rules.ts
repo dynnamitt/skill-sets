@@ -30,6 +30,7 @@ id: import
 language: ${language}
 rule: { kind: import_statement }`
 
+/** The ast-grep inline rules for each language. */
 export const RULES: Readonly<Record<Lang, string>> = {
   bash: BASH,
   typescript: script('typescript'),
