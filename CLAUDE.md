@@ -13,8 +13,9 @@ Each skill lives in its own directory:
 ```
 <skill-name>/
 ├── SKILL.md          # Entry point — activation triggers, key principles, inline guidance
-└── references/       # Deep-dive docs linked from SKILL.md
-    └── *.md
+├── references/       # Deep-dive docs linked from SKILL.md
+│   └── *.md
+└── scripts/          # Optional helper scripts
 ```
 
 **Current skills:**
